@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gauge"
+version = "0.1.0a1"
+description = "Capture model calls and compare reference and candidate outputs."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Typing :: Typed",
+]
+
+[project.scripts]
+gauge = "gauge.__main__:main"
+
+[project.optional-dependencies]
+openai = ["openai>=3.29,<3.30", "httpx>=0.28,<1"]
+validation = ["openai>=3.29,<3.30", "httpx>=0.28,<1", "pyarrow>=18,<24"]
+dev = ["build>=1.2", "pytest>=8", "ruff>=0.11", "httpx>=0.28", "mypy>=1.15"]
+cli = [
+    "httpx>=0.28,<1",
+    "textual>=6,<9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gauge"]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
+
+[tool.hatch.build.targets.sdist.force-include]
+"../pixel-lab/pixel-lab.js" = "pixel-lab/pixel-lab.js"
+"../pixel-lab/pixel-lab.css" = "pixel-lab/pixel-lab.css"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]

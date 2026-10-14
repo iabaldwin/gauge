@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gauge / Pixel Lab — interactive component library</title>
+  <link rel="stylesheet" href="../pixel-lab.css">
+  <link rel="stylesheet" href="demo.css">
+</head>
+<body>
+  <main class="demo-shell">
+    <header class="pl demo-header">
+      <div><span class="demo-eyebrow">PIXEL LAB / COMPONENT LIBRARY</span><h1>Every view. One lab.</h1><p>Compare models, explore distributions, inspect responses, and replay traces.</p></div>
+      <span class="demo-fixture-badge">SYNTHETIC FIXTURES</span>
+    </header>
+    <nav class="pl demo-nav" aria-label="Library navigation">
+      <div role="tablist" aria-label="Library components">
+        <button id="tab-comparisons" role="tab" aria-controls="comparisons" aria-selected="true">Comparisons</button>
+        <button id="tab-histograms" role="tab" aria-controls="histograms" aria-selected="false" tabindex="-1">Histograms</button>
+        <button id="tab-inspector" role="tab" aria-controls="inspector" aria-selected="false" tabindex="-1">Request inspector</button>
+        <button id="tab-workspace" role="tab" aria-controls="workspace" aria-selected="false" tabindex="-1">Traces &amp; replay</button>
+      </div>
+      <a href="../README.md">Library API ↗</a>
+    </nav>
+    <section id="comparisons" role="tabpanel" aria-labelledby="tab-comparisons">
+      <div class="pl demo-section-heading"><h2>Model comparisons</h2><p>Model summaries, response pairs, distributions, and status filters. Inspect a row for its full request; run a synthetic test, pause updates, or export JSON.</p></div>
+      <div id="comparison-app"></div>
+    </section>
+    <section id="histograms" class="pl demo-gallery" role="tabpanel" aria-labelledby="tab-histograms" hidden>
+      <div class="demo-gallery-heading"><div><span class="demo-eyebrow">HISTOGRAM / STANDALONE COMPONENT</span><h2>One component, different questions.</h2><p>Toggle models in each legend. Hover or focus a bar for its range and count.</p></div></div>
+      <div class="demo-controls">
+        <label>Example dataset<select id="demo-scenario" aria-label="Example dataset"><option value="standard">Standard sample · 192 calls</option><option value="small">Small sample · 8 calls</option><option value="tail">Heavy tail · 192 calls</option></select></label>
+        <label>Bin resolution<select id="demo-bins" aria-label="Bin resolution"><option value="4">4 bins</option><option value="8" selected>8 bins</option><option value="12">12 bins</option><option value="16">16 bins</option></select></label>
+        <button id="demo-resample" type="button">↻ New sample</button>
+        <span id="demo-sample-state" role="status"></span>
+      </div>
+      <div class="demo-chart-grid">
+        <article class="demo-chart-card" aria-label="Latency histogram example"><div class="demo-card-caption"><span>01 / COMPARE MODELS</span><p>Three distributions on the same time axis.</p></div><div id="demo-latency"></div></article>
+        <article class="demo-chart-card" aria-label="Reasoning histogram example"><div class="demo-card-caption"><span>02 / OBSERVED ZERO</span><p>Zero reasoning is a measurement, not missing data.</p></div><div id="demo-reasoning"></div></article>
+        <article class="demo-chart-card" aria-label="Missing counters histogram example"><div class="demo-card-caption"><span>03 / PARTIAL COVERAGE</span><p>Missing counters stay out of the histogram.</p></div><div id="demo-coverage"></div></article>
+        <article class="demo-chart-card demo-chart-wide" aria-label="Long tail histogram example"><div class="demo-card-caption"><span>04 / KEEP THE OUTLIERS</span><p>A few slow requests can hide behind a fast median.</p></div><div id="demo-tail"></div></article>
+        <article class="demo-chart-card" aria-label="Empty histogram example"><div class="demo-card-caption"><span>05 / NO MEASUREMENTS</span><p>An empty chart has an explicit state.</p></div><div id="demo-empty"></div></article>
+      </div>
+      <details class="demo-code-example"><summary>Use this component in your own page</summary><pre><code>const chart = new PixelLab.Histogram('#chart', {
+  title: 'Latency', unit: 'ms', bins: 8
+});
+chart.update([
+  { id: 'original', label: 'Original', values: [420, 530, 610] },
+  { id: 'qwen', label: 'Qwen', values: [180, 240, 390] }
+]);</code></pre></details>
+      <p class="demo-data-note">All examples use seeded, illustrative data. Controls run entirely in your browser; no provider calls or backend connection.</p>
+    </section>
+    <section id="inspector" class="pl" role="tabpanel" aria-labelledby="tab-inspector" hidden>
+      <div class="demo-section-heading"><h2>Request inspector</h2><p>A standalone explorer and output inspector. Search requests, switch candidates, compare lines, inspect input and raw records, and copy outputs.</p></div>
+      <div class="demo-inspection-grid"><aside id="inspector-explorer" class="pl-explorer" aria-label="Standalone request explorer"></aside><div id="standalone-inspector" class="pl-inspector"></div></div>
+    </section>
+    <section id="workspace" role="tabpanel" aria-labelledby="tab-workspace" hidden>
+      <div class="pl demo-section-heading"><h2>Trace workspace</h2><p>Explore the execution map, zoom and fit, inspect nodes and recorded spans, or replay the timeline. Search, filter, pause, export, and simulate incoming requests.</p></div>
+      <div id="app"></div>
+    </section>
+  </main>
+  <script src="../pixel-lab.js"></script>
+  <script src="histograms.js"></script>
+  <script src="demo.js"></script>
+</body>
+</html>

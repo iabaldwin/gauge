@@ -1,0 +1,34 @@
+body{margin:12px;background:#dce3ef}
+[hidden]{display:none!important}
+.load-state{background:#fff;border:2px solid #142449;padding:32px;box-shadow:6px 6px 0 #142449;max-width:850px;margin:36px auto;color:#142449}
+.load-state>strong{background:#fff263;padding:6px 10px}.load-state h1{font-size:24px;margin-top:28px}.load-state p{line-height:1.6}.load-state pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#e9eef8;padding:16px;font-size:12px}
+.connection{padding:10px 12px;margin-bottom:10px;background:#fff;border:1px solid #142449}
+.connection form{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.connection strong{font-size:11px;letter-spacing:1px}.connection input{width:210px;font-size:11px}
+.connection label{font-size:11px}.connection #server-state{font-size:10px;color:#667390;flex:1;min-width:200px}
+#app{height:auto;min-height:calc(100dvh - 24px);overflow:visible;display:flex;flex-direction:column}
+#app>*{flex-shrink:0}
+#app>.pl-comparison-content{flex:none;overflow:visible}
+#app .pl-pair-table pre,#app .pl-output pre,#app .pl-cell-reason{max-height:none;overflow:visible}
+#app[data-loading=true]>.pl-summary,#app[data-loading=true]>.pl-comparison-content,#app[data-loading=true]>.pl-footer{display:none}
+#app>.connection{border-left:0;border-right:0;border-top:0;margin-bottom:0}
+#app>.queue-status,#app>.validation-summary{margin:12px 16px 0}
+#app>.pl-summary{margin-top:12px}
+.queue-status{border:1px solid #142449;background:#f8faff;margin-bottom:12px;box-shadow:3px 3px 0 #b6c3d9;padding:14px 20px}
+.queue-status header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:10px;letter-spacing:1px}
+.queue-status header strong{display:flex;align-items:center;gap:8px}.queue-status header span{color:#667390;font-size:9px;letter-spacing:0}
+.queue-status dl{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:16px 0 12px}
+.queue-status dt{color:#667390;font-size:10px;margin-bottom:6px}.queue-status dd{margin:0;font-size:23px;font-weight:bold;color:#142449;font-variant-numeric:tabular-nums}
+.queue-status #queue-active{color:#0649ff}.queue-status #queue-completed{color:#00814b}.queue-status #queue-failed{color:#d32746}
+.queue-status[data-live=false] .pl-live-dot{background:#667390}
+.queue-status progress{display:block;width:100%;height:7px;accent-color:#0649ff;border:0}.queue-status p{font-size:9px;line-height:1.6;color:#667390;margin-top:10px}
+#app [data-action=run]{display:none}
+.connection #run{width:260px;font-size:11px}.connection .session-connected [data-auth]{display:none}
+@media(max-width:850px){#app{height:auto}.connection{margin-bottom:8px}}
+@media(max-width:540px){body{margin:0}.connection{border-left:0;border-right:0}.connection input{width:170px}}
+@media(max-width:540px){.queue-status{padding:14px}.queue-status dl{grid-template-columns:repeat(3,minmax(0,1fr))}.queue-status dd{font-size:19px}}
+.validation-summary{border:1px solid #142449;background:#fff;margin-bottom:12px;box-shadow:3px 3px 0 #b6c3d9}
+.validation-summary>summary{cursor:pointer;padding:15px 20px;font-size:11px;font-weight:bold;background:#fff260}
+.validation-body{padding:16px 20px}.validation-body p{font-size:10px;line-height:1.7;color:#667390;margin-bottom:12px}
+.validation-table-scroll{overflow:auto}.validation-body table{width:100%;border-collapse:collapse;font-size:10px}
+.validation-body td,.validation-body th{padding:12px;text-align:left;border-bottom:1px solid #dce3ef}.validation-body th{background:#f2f5fa}

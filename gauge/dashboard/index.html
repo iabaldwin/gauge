@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gauge / Pixel Lab</title>
+  <link rel="stylesheet" href="/pixel-lab/pixel-lab.css">
+  <link rel="stylesheet" href="/dashboard/dashboard.css">
+</head>
+<body>
+  <section class="connection pl" aria-label="Gauge backend connection">
+    <form id="connect-form">
+      <strong>LOCAL BACKEND</strong>
+      <label for="run">Saved run</label>
+      <select id="run" disabled><option value="">Live / all captures</option></select>
+      <label for="key" data-auth>Gauge key</label>
+      <input id="key" data-auth type="password" autocomplete="off" placeholder="GAUGE_API_KEY">
+      <button class="pl-primary" data-auth type="submit">Connect</button>
+      <button id="disconnect" type="button" disabled>Disconnect</button>
+      <span id="server-state" role="status">Connect to view captured requests. Provider keys stay on the server.</span>
+    </form>
+  </section>
+  <section id="queue-status" class="pl queue-status" aria-label="Live comparison queue" hidden>
+    <header><strong><i class="pl-live-dot"></i> <span id="queue-title">COMPARISON QUEUE</span></strong><span id="queue-updated"></span></header>
+    <dl>
+      <div><dt>Queued</dt><dd id="queue-queued">—</dd></div>
+      <div><dt>Active</dt><dd id="queue-active">—</dd></div>
+      <div><dt>Completed</dt><dd id="queue-completed">—</dd></div>
+      <div><dt>Failed</dt><dd id="queue-failed">—</dd></div>
+      <div><dt>Dropped</dt><dd id="queue-dropped">—</dd></div>
+    </dl>
+    <progress id="queue-progress" aria-label="Comparison jobs finished" max="1" value="0"></progress>
+    <p id="queue-note"></p>
+  </section>
+  <details id="validation-summary" class="pl validation-summary" hidden></details>
+  <section id="load-state" class="pl load-state" role="status">
+    <h1 id="load-title">Loading saved results…</h1>
+    <p id="load-message">Connecting to the backend. Counts will appear after results load.</p>
+    <div id="login-help" hidden>
+      <p>Enter your Gauge key above, or run this command from the project folder and open the sign-in link it prints in this browser:</p>
+      <pre>gauge/.venv/bin/python tools/gauge_backend.py open</pre>
+    </div>
+    <button id="retry" type="button">Retry connection</button>
+  </section>
+  <div id="app" hidden></div>
+  <script src="/pixel-lab/pixel-lab.js"></script>
+  <script src="/dashboard/gauge-adapter.js"></script>
+  <script src="/dashboard/validation-summary.js"></script>
+  <script src="/dashboard/app.js"></script>
+</body>
+</html>

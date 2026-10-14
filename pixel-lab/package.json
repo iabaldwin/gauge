@@ -1,0 +1,34 @@
+{
+  "name": "@gauge/pixel-lab",
+  "version": "0.1.0",
+  "description": "Dependency-free comparison tables, histograms, and trace visualization components",
+  "main": "./pixel-lab.js",
+  "module": "./pixel-lab.mjs",
+  "types": "./pixel-lab.d.ts",
+  "exports": {
+    ".": {
+      "types": "./pixel-lab.d.ts",
+      "import": "./pixel-lab.mjs",
+      "require": "./pixel-lab.js"
+    },
+    "./style.css": "./pixel-lab.css"
+  },
+  "files": [
+    "pixel-lab.js",
+    "pixel-lab.mjs",
+    "pixel-lab.css",
+    "pixel-lab.d.ts",
+    "README.md",
+    "demo/"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "test:browser": "node test/browser.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}
