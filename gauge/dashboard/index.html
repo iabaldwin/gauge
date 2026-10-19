@@ -11,13 +11,12 @@
   <section class="connection pl" aria-label="Gauge backend connection">
     <form id="connect-form">
       <strong>LOCAL BACKEND</strong>
+      <label for="project">Project</label>
+      <select id="project" disabled><option value="">Current project</option></select>
       <label for="run">Saved run</label>
       <select id="run" disabled><option value="">Live / all captures</option></select>
-      <label for="key" data-auth>Gauge key</label>
-      <input id="key" data-auth type="password" autocomplete="off" placeholder="GAUGE_API_KEY">
-      <button class="pl-primary" data-auth type="submit">Connect</button>
       <button id="disconnect" type="button" disabled>Disconnect</button>
-      <span id="server-state" role="status">Connect to view captured requests. Provider keys stay on the server.</span>
+      <span id="server-state" role="status">Loading captured requests. Provider keys stay on the server.</span>
     </form>
   </section>
   <section id="queue-status" class="pl queue-status" aria-label="Live comparison queue" hidden>
@@ -36,10 +35,6 @@
   <section id="load-state" class="pl load-state" role="status">
     <h1 id="load-title">Loading saved results…</h1>
     <p id="load-message">Connecting to the backend. Counts will appear after results load.</p>
-    <div id="login-help" hidden>
-      <p>Enter your Gauge key above, or run this command from the project folder and open the sign-in link it prints in this browser:</p>
-      <pre>gauge/.venv/bin/python tools/gauge_backend.py open</pre>
-    </div>
     <button id="retry" type="button">Retry connection</button>
   </section>
   <div id="app" hidden></div>

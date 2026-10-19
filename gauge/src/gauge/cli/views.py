@@ -133,6 +133,14 @@ def status_view(stats: dict) -> Text:
     text.append_text(progress(done, total))
     text.append(f"\nQueued {stats.get('queued', 0)}   Active {stats.get('active', 0)}   ", MUTED)
     text.append(f"Errors {stats.get('failed', 0)}   ", "#d32746")
+    losses = sum(
+        d.get("export_dropped", 0) + d.get("failed", 0) + d.get("queue_dropped", 0)
+        for d in stats.get("capture_diagnostics", [])
+    )
+    if losses:
+        text.append(f"Capture losses {losses}   ", "#d32746")
+    if stats.get("configuration_note"):
+        text.append("\n" + stats["configuration_note"], MUTED)
     j = stats.get("judging", {})
     text.append(
         f"JEV: {j.get('active', 0)} active · {j.get('queued', 0)} queued · "

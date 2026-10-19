@@ -26,7 +26,7 @@ def main():
     live = commands.add_parser("run", help="Paid source calls and separate backend comparisons")
     live.add_argument("manifest", type=Path)
     live.add_argument("--output", type=Path, default=Path("out/validation-live.json"))
-    live.add_argument("--connection", type=Path, default=Path(".gauge/backend.json"))
+    live.add_argument("--connection", type=Path, default=Path(".gauge/service.json"))
     live.add_argument(
         "--source-model",
         default="gpt-4.1-nano"

@@ -41,7 +41,6 @@ def test_export_retries_are_bounded_and_keep_same_call_id(monkeypatch):
 
     exporter = HTTPExporter(
         "https://gauge.invalid/v1/captures",
-        api_key="gauge-only",
         max_retries=1,
         failure_threshold=2,
         transport=httpx.MockTransport(handle),
@@ -54,7 +53,7 @@ def test_export_retries_are_bounded_and_keep_same_call_id(monkeypatch):
         assert not exporter.send(payload)  # Circuit is now open: no HTTP request.
         assert len(attempts) == 4
         assert {r.headers["idempotency-key"] for r in attempts} == {payload["call_id"]}
-        assert all(r.headers["authorization"] == "Bearer gauge-only" for r in attempts)
+        assert all("authorization" not in r.headers for r in attempts)
         assert all(b"never-export-this" not in r.content for r in attempts)
         exporter._open_until = 0
         assert not exporter.send(payload)  # Recovery probe is bounded too.

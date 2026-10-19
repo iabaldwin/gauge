@@ -93,8 +93,8 @@ async def run(
             print(json.dumps({"run_id": run_id, "dashboard": report["dashboard"]}), flush=True)
             os.environ.update(
                 GAUGE_ENDPOINT=backend.url + "/v1/captures",
-                GAUGE_API_KEY=backend.http.headers["Authorization"][7:],
                 GAUGE_ENABLED="1",
+                GAUGE_RUN_ID=run_id,
             )
             semaphore = asyncio.Semaphore(concurrency)
             async with AsyncOpenAI(

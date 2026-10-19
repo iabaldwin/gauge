@@ -18,8 +18,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
+from gauge.local.runtime import ensure_service as settings
 from gauge.openai import AsyncOpenAI as GaugeAsyncOpenAI
-from gauge_backend import settings
 from openai import AsyncOpenAI
 
 from gauge import captures
@@ -180,15 +180,6 @@ def main():
     ).rstrip("/")
     if urlsplit(backend_url).hostname not in {"127.0.0.1", "localhost"}:
         parser.error("Saturation control is restricted to a dedicated loopback backend")
-    token = (
-        os.environ.get("GAUGE_API_KEY")
-        if args.backend_url
-        else config.get("token") or os.environ.get("GAUGE_API_KEY")
-    )
-    if not token:
-        parser.error(
-            "Start the backend first: gauge/.venv/bin/python tools/gauge_backend.py start"
-        )
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     run_id = None
@@ -217,14 +208,12 @@ def main():
     try:
         os.environ.update(
             GAUGE_ENDPOINT=backend_url + "/v1/captures",
-            GAUGE_API_KEY=token,
             GAUGE_ENABLED="1",
         )
         with httpx.Client(
             base_url=backend_url,
             trust_env=False,
             timeout=3,
-            headers={"Authorization": f"Bearer {token}"},
         ) as control:
             response = control.post(
                 "/v1/runs/start",
@@ -238,6 +227,7 @@ def main():
             response.raise_for_status()
             run = response.json()["run"]
             run_id = run["id"]
+            os.environ["GAUGE_RUN_ID"] = run_id
             report["limits"]["comparison_workers"] = run.get("workers", 1)
             report["run_id"] = run_id
             report["dashboard_url"] += "?run=" + run_id
@@ -392,8 +382,7 @@ def main():
                     base_url=backend_url,
                     trust_env=False,
                     timeout=5,
-                    headers={"Authorization": f"Bearer {token}"},
-                ) as control:
+                        ) as control:
                     control.post("/control", json={"paused": False}).raise_for_status()
                     control.post(
                         "/v1/runs/end", json={"run_id": run_id, "report": summary}

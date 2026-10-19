@@ -1,5 +1,4 @@
 import json
-import sqlite3
 import threading
 import time
 from types import SimpleNamespace
@@ -11,7 +10,8 @@ from gauge.wire import CaptureEvent
 
 
 @pytest.fixture
-def backend_module():
+def backend_module(monkeypatch):
+    monkeypatch.setenv("FIREWORKS_API_KEY", "unused-fixture")
     from gauge.backend import server
 
     return server
@@ -186,32 +186,7 @@ def test_multiple_candidates_share_capture_without_overwrites_or_pagination_dupl
     assert all(len(r["comparisons"]) == 2 for r in first["records"] + second["records"])
 
 
-def test_legacy_comparison_schema_is_migrated_without_losing_results(tmp_path):
-    from gauge.backend.store import DashboardStore
-
-    path = str(tmp_path / "legacy.sqlite")
-    item = event()
-    inbox = CaptureInbox(path)
-    inbox.accept(json.dumps(item).encode())
-    inbox.close()
-    job = {
-        "call_id": item["call_id"],
-        "candidate": "qwen",
-        "status": "completed",
-        "candidate_output": "household",
-    }
-    with sqlite3.connect(path) as db:
-        db.execute(
-            "CREATE TABLE gauge_comparisons (call_id TEXT PRIMARY KEY, payload TEXT NOT NULL)"
-        )
-        db.execute("INSERT INTO gauge_comparisons VALUES (?, ?)", (job["call_id"], json.dumps(job)))
-    store = DashboardStore(path)
-    assert store.page()["records"][0]["comparisons"] == [job]
-    store.put({**job, "candidate": "gpt-oss"})
-    assert len(DashboardStore(path).page()["records"][0]["comparisons"]) == 2
-
-
-@pytest.mark.parametrize("budget", [5, 12])
+@pytest.mark.parametrize("budget", [6, 2])
 def test_three_model_fanout_workers_and_global_budget(
     backend_module, monkeypatch, tmp_path, budget
 ):

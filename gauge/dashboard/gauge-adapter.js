@@ -75,17 +75,15 @@
       metadata:{operation:e.operation,providerRequestId:e.provider_request_id,captureStatus:e.status,replayEligible:e.replay_eligible,ineligibleReason:e.ineligible_reason,
         comparisonHistory:jobs.length ? 'tracked' : 'unavailable; capture predates dashboard tracking',timing:'Backend offsets use wall clocks; original duration is measured.'}};
   }
-  function pollingSource({token,intervalMs=1500,timeoutMs=5000,onSnapshot=()=>{},fetchImpl=globalThis.fetch.bind(globalThis),url='/v1/dashboard'} = {}) {
+  function pollingSource({intervalMs=1500,timeoutMs=5000,onSnapshot=()=>{},fetchImpl=globalThis.fetch.bind(globalThis),url='/v1/dashboard'} = {}) {
     return sink => {
       let stopped=false,timer=null,controller=null,failures=0;
       const seen=new Map();
       async function poll() {
         controller=new AbortController();const deadline=setTimeout(()=>controller?.abort(),timeoutMs);
-        let unauthorized=false;
         try {
-          const options={headers:token?{Authorization:`Bearer ${token}`}:{},credentials:'same-origin',cache:'no-store',signal:controller.signal};
+          const options={credentials:'same-origin',cache:'no-store',signal:controller.signal};
           const response=await fetchImpl(url,options);
-          if(response.status===401) { unauthorized=true;throw new Error('Unauthorized. Reconnect with the Gauge backend key.'); }
           if(!response.ok) throw new Error(`Dashboard HTTP ${response.status}`);
           const snapshot=await response.json();
           if(![1,2].includes(snapshot.schema_version) || !Array.isArray(snapshot.records)) throw new Error('Unsupported dashboard feed');
@@ -110,10 +108,10 @@
           for(const id of seen.keys())if(!retained.has(id))seen.delete(id);
           failures=0;sink.status('Connected · polling');onSnapshot(snapshot);
         } catch(error) {
-          if(!stopped){failures++;sink.status(unauthorized?'Unauthorized':'Disconnected · retrying');sink.error(error);}
+          if(!stopped){failures++;sink.status('Disconnected · retrying');sink.error(error);}
         } finally {
           clearTimeout(deadline);controller=null;
-          if(!stopped&&!unauthorized)timer=setTimeout(poll,Math.min(15000,Math.max(250,intervalMs)*2**Math.min(failures,4)));
+          if(!stopped)timer=setTimeout(poll,Math.min(15000,Math.max(250,intervalMs)*2**Math.min(failures,4)));
         }
       }
       sink.status('Connecting');poll();

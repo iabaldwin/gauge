@@ -1,4 +1,4 @@
-"""Small authenticated backend client shared by terminal commands and the TUI."""
+"""Small internal backend client shared by terminal commands and the TUI."""
 
 from __future__ import annotations
 
@@ -15,19 +15,32 @@ class ConsoleError(RuntimeError):
 
 
 class ConsoleClient:
-    def __init__(self, connection: Path):
+    def __init__(self, connection: Path | None = None):
         try:
-            config = json.loads(connection.read_text())
+            if connection is None:
+                from gauge.local.runtime import ensure_service
+                from gauge.local.state import project_root
+
+                remote = project_root() / ".gauge/remote.json"
+                config = json.loads(remote.read_text()) if remote.exists() else ensure_service()
+            else:
+                config = json.loads(connection.read_text())
+            self.project_id = config.get("project_id")
             self.url = config["url"].rstrip("/")
-            if urlsplit(self.url).hostname not in {"127.0.0.1", "localhost", "::1"}:
-                raise ValueError("Operator console requires a loopback backend")
+            parsed = urlsplit(self.url)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+            ):
+                raise ValueError("Invalid internal backend URL")
             self.http = httpx.Client(
                 base_url=self.url,
                 trust_env=False,
                 timeout=10,
-                headers={"Authorization": "Bearer " + config["token"]},
             )
-        except (OSError, KeyError, ValueError) as exc:
+        except (OSError, KeyError, ValueError, RuntimeError) as exc:
             raise ConsoleError(f"Cannot load connection file: {connection}") from exc
 
     def close(self) -> None:
@@ -35,6 +48,9 @@ class ConsoleClient:
 
     def request(self, method: str, path: str, body: dict | None = None) -> dict:
         try:
+            separator = "&" if "?" in path else "?"
+            if self.project_id:
+                path += separator + urlencode({"project_id": self.project_id})
             r = self.http.request(method, path, json=body)
             if not r.is_success:
                 try:
@@ -52,10 +68,10 @@ class ConsoleClient:
         stats.pop("results", None)
         return {"runs": runs, "stats": stats}
 
-    def records(self, run_id: str) -> list[dict]:
+    def records(self, run_id: str | None) -> list[dict]:
         records, cursor = [], None
         while True:
-            query = {"run_id": run_id}
+            query = {"run_id": run_id} if run_id else {}
             if cursor is not None:
                 query["before"] = str(cursor)
             page = self.request("GET", "/v1/dashboard?" + urlencode(query))
@@ -84,8 +100,16 @@ class ConsoleClient:
     def judge(self, run_id: str, limit: int = 30) -> dict:
         return self.request("POST", "/v1/judgments", {"run_id": run_id, "limit": limit})
 
-    def dashboard(self) -> str:
-        return self.url + self.request("POST", "/dashboard/ticket")["path"]
+    def dashboard(self, run_id: str | None = None) -> str:
+        if run_id is None:
+            runs = self.request("GET", "/v1/runs")["runs"]
+            run_id = runs[0]["id"] if runs else None
+        query = {}
+        if run_id:
+            query["run"] = run_id
+        if self.project_id:
+            query["project_id"] = self.project_id
+        return self.url + "/dashboard" + ("?" + urlencode(query) if query else "")
 
 
 def export_run(client: ConsoleClient, run_id: str, output: Path) -> Path:

@@ -1,100 +1,84 @@
-# Gauge terminal console
+# Gauge terminal tools
 
-The optional operator console uses Pixel Lab's cream, navy, blue, yellow, green,
-and orange palette. It connects to the same saved results and queues as the web
-dashboard. It is separate from the drop-in SDK and adds no SDK runtime imports
-or dependencies.
-
-From the project root:
+The terminal is the first results interface. Install Gauge, swap the client, run
+normal pytest tests, then inspect the saved run. No Gauge login or credentials.
+The CLI discovers `.gauge/project.json` in the current project and starts the
+separate service when needed. SDK capture does not start that service.
 
 ```sh
-uv sync --project gauge --all-extras
-gauge/.venv/bin/gauge tui --color
+gauge project
+gauge runs list
+gauge requests
+gauge requests RUN_ID --json
+gauge inspect CALL_ID
+gauge inspect CALL_ID --json
+gauge runs show RUN_ID
+gauge runs export RUN_ID --output out/run.json
+gauge tui --color
+gauge dashboard RUN_ID
 ```
 
-For an installed package, install `gauge[cli]`, then run `gauge tui`. The console
-uses terminal colors by default unless `NO_COLOR` is set; `--color` explicitly
-enables them and `--no-color` selects monochrome. It uses `.gauge/backend.json` by default; pass `--connection /path/to/backend.json`
-to use another local backend. `python -m gauge` exposes the same commands.
+`dashboard` opens the selected run in the browser. Omit the run ID to select the
+latest. `--print-only` prints its ordinary URL without opening a browser. The
+terminal and browser read the same captures, outputs, context, and judgments.
+Original-only requests remain visible when no comparisons have run.
 
-## Terminal workspace
-
-- The top strip shows live backend comparison progress, queued/active jobs,
-  errors, and JEV work. These are backend process counters.
-- The run picker selects persisted results. Model summaries show completed
-  coverage, semantic agreement with its denominator, uncertain judgments,
-  median candidate latency, and inference errors for the selected run.
-- Narrow terminals use a compact layout with the result table retained; widen
-  the terminal or use `gauge runs show RUN_ID` for the model summary.
-- The result table lists captured exchanges and candidate models. Enter opens
-  original/candidate outputs, captured input, and the complete stored judgment.
-- Refresh polls about every 2.5 seconds. Disconnections show an error and retry;
-  inspection and navigation remain available. Closing the console leaves the
-  backend running.
-
-Keys: `↑↓` navigate, `Tab` change focus, `Enter` select a run or inspect an output,
-`/` find, `r` refresh, `e` export selected run, `j` enqueue at most 30 judgments,
-`p` pause/resume comparison dispatch, `o` open the browser sign-in link,
-`d` preview clearing the selected run, `D` preview clearing all saved runs,
-`Esc` cancel a dialog, and `q` quit. Judging is a paid operation when triggered;
-merely opening the console does not launch inference or judges. Pausing
-comparison dispatch does not pause the independent judge workers.
-
-## CLI utilities
+## Backend and evaluation configuration
 
 ```sh
+gauge backend start
+gauge backend status
+gauge configure --budget 300
+gauge compare RUN_ID --limit 100
+gauge configure --models MODEL_A MODEL_B MODEL_C --budget 300 --automatic --sample-rate 0.5
 gauge status
-gauge status --json
-gauge runs list
-gauge runs show RUN_ID
-gauge runs export RUN_ID --output out/saved-run.json
 gauge judge RUN_ID --limit 30
 gauge pause
 gauge resume
-gauge dashboard
+gauge backend stop
 ```
 
-`--json` is available on status, runs, judge, pause, and resume for scripts.
-Noninteractive output uses Rich's terminal color detection and respects
-`NO_COLOR`. Exports include run metadata, captured requests/responses, and
-comparison/judgment results. They exclude connection credentials, use owner-only
-permissions, and never overwrite an existing file.
+Provider credentials are read by the backend process when it starts. With no
+Fireworks key, originals remain inspectable and comparison dispatch reports the
+missing configuration. After adding credentials to the environment, stop/start
+the backend. Neither opening the console nor dashboard initiates paid work.
 
-## Clearing saved results
+The comparison budget counts candidate jobs and survives backend restarts. Existing
+jobs are not automatically repeated. Automatic mode evaluates newly captured work
+up to the policy's budget; sampling is stable for a given request ID. Policy changes
+require drained queues. Compare/JEV commands use provider inference when configured.
+
+The TUI uses Pixel Lab colors, respects `NO_COLOR`, and offers `--color`/`--no-color`.
+Keys: Enter inspects; `/` searches; `r` refreshes; `e` exports; `j` judges; `p`
+pauses/resumes; `o` opens the selected run; `d` previews clearing one run; `D`
+previews all; Escape cancels; `q` quits. Exiting leaves the backend running.
+
+## Internal shared service
+
+```sh
+gauge connect https://YOUR-INTERNAL-GAUGE
+gauge connect https://YOUR-INTERNAL-GAUGE --project-id PROJECT_ID
+```
+
+The first command registers the local project ID, uploads captures with their run
+IDs, and connects future terminal/SDK work to that namespace. Run metadata and IDs
+are retained. Reconnecting is idempotent. Selecting another project's ID is allowed
+only when the local project has no captures. There are no user accounts or access
+roles; namespaces segment data, not permissions.
+
+Use `--connection PATH` for an explicit service connection file containing `url`
+and optionally `project_id`. It contains no Gauge authentication token.
+
+## Clearing results
 
 ```sh
 gauge runs clear RUN_ID --dry-run
 gauge runs clear RUN_ID
-# Explicit batch operation, after reviewing the preview:
 gauge runs clear --all --dry-run --json
 gauge runs clear --all --yes --json
 ```
 
-The interactive CLI and TUI require typing `CLEAR` after showing the affected
-runs, captures, comparisons, and judgments. Scripts must explicitly pass `--yes`.
-The server requires an idle backend: no active run, comparison work, or judge
-work. It rejects a changed preview and protects contexts referenced by surviving
-captures. Clearing all saved runs does not select unassigned captures.
-
-Before deleting anything, the backend saves an owner-only copy of the entire
-SQLite database in a `backups/` directory next to the database. Selected run
-metadata, capture associations, captures, and comparisons (including judgment
-history) are then removed together in one transaction. Backups and independently
-exported report files remain available. Restoring a backup requires stopping the
-backend and replacing its database file.
-
-The authenticated API is deliberately small: `POST /v1/runs/clear/preview`
-accepts either `run_ids` or `all: true`; `POST /v1/runs/clear` requires the exact
-`run_ids` and `fingerprint` from that preview. Read-only dashboard cookies cannot
-authorize either endpoint.
-
-## Code map
-
-- `cli/client.py`: backend requests, pagination, export.
-- `cli/views.py`: shared tables, progress, metrics, terminal text sanitization.
-- `cli/commands.py`: command routing and plain/JSON output.
-- `cli/tui.py`, `cli/dialogs.py`: interactive workspace and confirmation screens.
-- `backend/maintenance.py`: preview, dependency checks, backup, atomic removal.
-
-The interface uses [Textual](https://textual.textualize.io/guide/) and its
-[headless testing API](https://textual.textualize.io/guide/testing/).
+Interactive cleanup requires typing CLEAR. Noninteractive cleanup requires `--yes`.
+The selected project is the boundary for preview, backup, and deletion. Queues must
+be idle, the preview must still match, and surviving captures' context is protected.
+A database backup is created before deletion. Exports and backups are retained.

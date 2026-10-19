@@ -82,7 +82,8 @@ class CaptureInbox:
     """
 
     def __init__(self, path: str) -> None:
-        self._db = sqlite3.connect(path, timeout=1)
+        self._db = sqlite3.connect(path, timeout=2)
+        self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("""
             CREATE TABLE IF NOT EXISTS gauge_captures (
                 call_id TEXT PRIMARY KEY,
@@ -93,7 +94,7 @@ class CaptureInbox:
         """)
         self._db.commit()
 
-    def accept(self, raw: bytes) -> tuple[str, bool]:
+    def accept(self, raw: bytes, *, run: dict | None = None) -> tuple[str, bool]:
         event = validate_capture(raw)
         payload = json.dumps(event, sort_keys=True, separators=(",", ":"), allow_nan=False)
         digest = hashlib.sha256(payload.encode()).hexdigest()
@@ -109,7 +110,16 @@ class CaptureInbox:
                 ).fetchone()
                 if original is None or original[0] != digest:
                     raise CaptureConflict("Call ID already contains a different capture")
-            return event["call_id"], cursor.rowcount == 1
+            inserted = cursor.rowcount == 1
+            if run is not None:
+                self._db.execute(
+                    "INSERT OR IGNORE INTO gauge_runs VALUES (?, ?)", (run["id"], json.dumps(run))
+                )
+                self._db.execute(
+                    "INSERT OR IGNORE INTO gauge_run_captures VALUES (?, ?)",
+                    (event["call_id"], run["id"]),
+                )
+            return event["call_id"], inserted
 
     def get(self, call_id: str) -> dict[str, Any] | None:
         row = self._db.execute(

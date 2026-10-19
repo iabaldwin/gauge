@@ -30,9 +30,9 @@ test('polling emits changed records only and disconnect cancels work',async()=>{
   await new Promise(r=>setTimeout(r,580));stop();const count=calls;await new Promise(r=>setTimeout(r,300));
   assert.ok(count>=2);assert.equal(calls,count);assert.equal(updates,1);assert.ok(states.includes('Connected · polling'));
 });
-test('unauthorized feed stops retries and reports the error',async()=>{
-  let calls=0;const errors=[];const stop=pollingSource({token:'wrong',intervalMs:250,fetchImpl:async()=>{calls++;return {status:401};}})({upsert:()=>assert.fail(),status:()=>{},error:e=>errors.push(e.message)});
-  await new Promise(r=>setTimeout(r,600));stop();assert.equal(calls,1);assert.match(errors[0],/Unauthorized/);
+test('backend errors are visible and disconnect stops retries',async()=>{
+  const errors=[];let calls=0;const stop=pollingSource({intervalMs:250,fetchImpl:async()=>{calls++;return {status:503,ok:false};}})({upsert:()=>assert.fail(),status:()=>{},error:e=>errors.push(e.message)});
+  await new Promise(r=>setTimeout(r,20));stop();assert.equal(calls,1);assert.match(errors[0],/HTTP 503/);
 });
 test('disconnect suppresses an in-flight response',async()=>{
   let resolve;const pending=new Promise(r=>resolve=r);let updates=0;

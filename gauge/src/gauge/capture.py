@@ -18,6 +18,7 @@ from itertools import islice
 from typing import Any, TypeVar
 from uuid import uuid4
 
+from gauge.execution import identity
 from gauge.wire import MAX_BODY_BYTES, CaptureEvent
 
 _SUPPRESSED: ContextVar[bool] = ContextVar("gauge_suppressed", default=False)
@@ -67,6 +68,7 @@ class CaptureBuffer:
         self.max_payload_bytes = max_payload_bytes
         self.max_buffer_bytes = max_buffer_bytes
         self.dropped = 0
+        self.queue_dropped = 0
         self.failed = 0
         self.exported = 0
         self.export_dropped = 0
@@ -112,10 +114,12 @@ class CaptureBuffer:
             or type(event) is not CaptureEvent
         ):
             self.dropped += 1
+            self.queue_dropped += 1
             return False
         size = event.size_bytes
         if not self._lock.acquire(blocking=False):
             self.dropped += 1
+            self.queue_dropped += 1
             return False
         try:
             if (
@@ -123,6 +127,7 @@ class CaptureBuffer:
                 or self._pending_bytes + size > self.max_buffer_bytes
             ):
                 self.dropped += 1
+                self.queue_dropped += 1
                 return False
             self._pending.append(event)
             self._pending_bytes += size
@@ -138,6 +143,10 @@ class CaptureBuffer:
                 from gauge.export import HTTPExporter
 
                 exporter = HTTPExporter.from_env()
+                if exporter is None and os.environ.get("GAUGE_STORAGE", "local") != "memory":
+                    from gauge.local.storage import LocalExporter
+
+                    exporter = LocalExporter()
             while True:
                 with self._lock:
                     event = self._pending.popleft() if self._pending else None
@@ -245,6 +254,8 @@ class _Call:
     endpoint_host: str | None = None
     provider_request_id: str | None = None
     attempts: int = 0
+    run_id: str = ""
+    process_id: str = ""
 
 
 def _begin(binding: _Binding) -> tuple[_Call, Token[_Call | None]] | None:
@@ -252,6 +263,8 @@ def _begin(binding: _Binding) -> tuple[_Call, Token[_Call | None]] | None:
         if not binding.enabled or _SUPPRESSED.get() or os.environ.get("GAUGE_ENABLED", "1") == "0":
             return None
         call = _Call(binding, f"call_{uuid4().hex}", time.perf_counter(), time.time())
+        execution = identity()
+        call.run_id, call.process_id = execution["run_id"], execution["process_id"]
         return call, _ACTIVE.set(call)
     except Exception:
         return None
@@ -286,6 +299,8 @@ def _finish(state: tuple[_Call, Token[_Call | None]] | None, error: BaseExceptio
                     provider_request_id=call.provider_request_id,
                     endpoint_host=call.endpoint_host,
                     attempts=call.attempts,
+                    run_id=call.run_id,
+                    process_id=call.process_id,
                 )
             )
     except Exception:

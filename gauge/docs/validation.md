@@ -18,14 +18,14 @@ gauge/
     drain.py                  # comparison/judge drain and bounded judge backfill
     checks.py                 # hidden-oracle correlation checks and offline replay
     scoring.py                # gold-label accuracy, JSON validity, SQuAD EM/F1
-    backend.py                # authenticated loopback control/feed client
+    backend.py                # internal loopback control/feed client
     runner.py                 # budgets, concurrency, execution and artifact lifecycle
     report.py                 # portable Pixel Lab report; no model invocation
     __main__.py               # argument parsing and command routing only
   backend/
     correlation.py            # evidence-based trace/workload reconstruction
     replay.py                 # bounded text context materialization
-    server.py                 # authenticated ingestion + isolated comparison workers
+    server.py                 # internal ingestion + isolated comparison workers
     store.py                  # SQLite persistence and read models
 ```
 
@@ -108,7 +108,7 @@ gauge/.venv/bin/python -m gauge.validation check \
 Run against an idle managed backend with source/provider credentials configured:
 
 ```sh
-gauge/.venv/bin/python tools/gauge_backend.py start --workers 12
+gauge/.venv/bin/gauge backend start
 gauge/.venv/bin/python -m gauge.validation run \
   out/validation-smoke.manifest.json --output out/validation-smoke.json
 ```

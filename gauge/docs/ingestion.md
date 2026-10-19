@@ -1,10 +1,10 @@
 # Gauge capture → separate backend
 
-The application only swaps its client import. Deployment configuration supplies
-`GAUGE_ENDPOINT` (the full HTTPS capture URL) and optionally `GAUGE_API_KEY` (Bearer
-authentication for Gauge, never a provider key). Without an endpoint, events remain
-local. The SDK contains no comparison dispatch, synthetic generation, or graders
-on its serving/capture path.
+The application swaps its client import. Capture persists locally by default.
+For a shared internal backend, `gauge connect URL` registers/selects the project
+namespace and uploads captures. Explicit `GAUGE_ENDPOINT` plus `GAUGE_PROJECT_ID`
+can configure direct delivery. There are no Gauge users, login, or ingestion keys.
+Provider credentials belong only to the application or comparison backend.
 
 ## Delivery
 
@@ -21,8 +21,8 @@ only. The SDK does not follow redirects, read acknowledgement bodies, or wait fo
 an evaluation. Network timeouts are 2 seconds per operation (10 ms for connection
 pool acquisition); they are not a hard wall-clock deadline against a trickling
 peer. This cannot block inference: queued events remain bounded and are dropped
-under pressure. No durable application-side spool or shutdown flush is required.
-Endpoint/token are read when the worker starts. TLS uses normal certificate
+under pressure. No caller-managed spool or shutdown flush is required. Default local persistence and pytest teardown delivery are automatic.
+Endpoint settings are read when the worker starts. TLS uses normal certificate
 verification; HTTP is accepted only for loopback development. The export client
 does not inherit proxy environment variables or provider transport configuration.
 
@@ -76,14 +76,14 @@ It does not establish ground truth or authorize executing any supplied tools.
 
 ## Receiver implementation
 
-`gauge.ingestion` is a backend-only module. `CaptureInbox` supplies a durable SQLite
+`gauge.ingestion` is used only on storage/service workers. `CaptureInbox` supplies a durable SQLite
 reference inbox; a deployed service can implement the same uniqueness contract
-in its existing database. It is never imported by the client integration.
+in its existing database. It is never imported on the original inference call path.
 
 ```python
 from gauge.ingestion import CaptureConflict, CaptureInbox
 
-# In the backend HTTP worker, after authenticating and limiting the request body:
+# In the backend HTTP worker, after selecting the project and limiting the request body:
 inbox = CaptureInbox("captures.sqlite")
 call_id, inserted = inbox.accept(raw_request_body)
 # Commit has completed. Return 202 for inserted or an identical duplicate.
@@ -96,18 +96,15 @@ Reusing the ID with different contents raises `CaptureConflict` and cannot repla
 the original request/response. Ineligible events can remain available for coverage
 and loss analysis but must not enter the comparison queue.
 
-The HTTP service must enforce authentication/tenant isolation and the envelope
-size limit while reading, rather than after an unbounded body read. Validate that
-its idempotency header matches the body ID. A production datastore should scope
-IDs to the authenticated tenant; never derive tenant identity from captured
-metadata. Persist before acknowledging, and never wait for a model/grader job in
-the ingestion handler. A [loopback reference service and dashboard](../dashboard/README.md)
-are available in this repository; production deployment and tenant isolation
-remain separate service responsibilities.
+The HTTP service enforces envelope size limits during the read and validates the
+idempotency header against the body ID. A project namespace selects a separate
+store; mismatched project IDs are rejected. This is segmentation for an internal
+company tool, not user authentication or an access-control boundary. Persist before
+acknowledging and never await inference or judging in the ingestion handler.
 
 ## Comparison lineage
 
-Candidate jobs, outputs, and grader results carry `(tenant_id, call_id)` plus the
+Candidate jobs, outputs, and grader results carry `(project_id, call_id)` plus the
 candidate identity and evaluation-policy/grader versions. Use the captured
 `response` as the original reference. Never replace it with a second OpenAI call;
 a rerun is a separately identified result. Idempotent job keys must also include

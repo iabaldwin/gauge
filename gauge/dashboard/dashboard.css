@@ -32,3 +32,5 @@ body{margin:12px;background:#dce3ef}
 .validation-body{padding:16px 20px}.validation-body p{font-size:10px;line-height:1.7;color:#667390;margin-bottom:12px}
 .validation-table-scroll{overflow:auto}.validation-body table{width:100%;border-collapse:collapse;font-size:10px}
 .validation-body td,.validation-body th{padding:12px;text-align:left;border-bottom:1px solid #dce3ef}.validation-body th{background:#f2f5fa}
+
+.connection #project{width:220px;font-size:11px}

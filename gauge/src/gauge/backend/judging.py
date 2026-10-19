@@ -7,6 +7,7 @@ import queue
 import threading
 import time
 from typing import Any
+from uuid import uuid4
 
 from gauge.backend.judge import MODEL, RUBRIC, JevJudge
 from gauge.backend.replay import ReplayUnavailable, materialize, response_text
@@ -51,6 +52,8 @@ class JudgeQueue:
             elif self.jobs.full():
                 reason = "Judge queue full"
             judgment = {
+                "id": "judgment_" + uuid4().hex,
+                "attempt_id": "attempt_" + uuid4().hex,
                 "status": "skipped" if reason else "pending",
                 "model": MODEL,
                 "rubric_version": RUBRIC,
@@ -63,7 +66,7 @@ class JudgeQueue:
             if reason:
                 return False
             self.inflight.add(key)
-            self.jobs.put_nowait((event, result, messages))
+            self.jobs.put_nowait((event, {**result, "judgment": judgment}, messages))
             self.stats["queued"] += 1
             return True
 
@@ -75,6 +78,8 @@ class JudgeQueue:
             key = (result["call_id"], result["candidate"])
             started = time.time()
             judgment: dict[str, Any] = {
+                "id": result["judgment"]["id"],
+                "attempt_id": result["judgment"]["attempt_id"],
                 "status": "running",
                 "model": MODEL,
                 "rubric_version": RUBRIC,

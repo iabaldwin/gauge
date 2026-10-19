@@ -33,8 +33,8 @@ def test_loopback_ingestion_contract_without_provider_calls(tmp_path):
         with httpx.Client(
             base_url=f"http://127.0.0.1:{ready['port']}", trust_env=False, timeout=3
         ) as client:
-            assert client.get("/stats").status_code == 401
-            assert client.get("/v1/dashboard").status_code == 401
+            assert client.get("/stats").status_code == 200
+            assert client.get("/v1/dashboard").status_code == 200
             shell = client.get("/dashboard")
             assert shell.status_code == 200
             assert "local-test-token" not in shell.text
@@ -42,14 +42,6 @@ def test_loopback_ingestion_contract_without_provider_calls(tmp_path):
             assert client.get("/pixel-lab/pixel-lab.js").status_code == 200
             assert client.get("/dashboard/gauge-adapter.js").status_code == 200
             assert client.get("/dashboard/../local_backend.py").status_code != 200
-            client.headers["Authorization"] = "Bearer local-test-token"
-            ticket = client.post("/dashboard/ticket").json()
-            assert ticket["expires_in"] == 1800
-            signed_in = client.get(ticket["path"])
-            assert signed_in.status_code == 303
-            assert "HttpOnly" in signed_in.headers["Set-Cookie"]
-            assert client.get(ticket["path"]).headers["Location"] == "/dashboard?session=expired"
-            assert client.get("/dashboard/session?ticket=expired").status_code == 303
             assert client.post("/control", json={"paused": True}).status_code == 200
             assert (
                 client.post("/v1/captures", content=b"x" * (MAX_ENVELOPE_BYTES + 1)).status_code
@@ -69,14 +61,14 @@ def test_loopback_ingestion_contract_without_provider_calls(tmp_path):
             assert client.post("/v1/captures", json=item, headers=headers).status_code == 202
             assert client.post("/v1/captures", json=item, headers=headers).status_code == 202
             stats = client.get("/stats").json()
-            assert stats["received"] == stats["duplicates"] == stats["ineligible"] == 1
+            assert stats["received"] == stats["duplicates"] == 1
+            assert stats["comparison_jobs"] == 0
             assert stats["calls_started"] == stats["queued"] == 0
             feed = client.get("/v1/dashboard")
             assert feed.headers["Cache-Control"] == "no-store"
             record = feed.json()["records"][0]
             assert record["capture"]["call_id"] == item["call_id"]
-            assert record["comparisons"][0]["status"] == "skipped"
-            assert record["comparisons"][0]["reason"] == "no_completed_response"
+            assert record["comparisons"] == []
     finally:
         process.terminate()
         process.wait(timeout=5)

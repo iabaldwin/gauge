@@ -1,4 +1,4 @@
-"""Authenticated loopback control/feed client for benchmark processes, not applications."""
+"""Internal loopback control/feed client for benchmark processes, not applications."""
 
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ class BackendClient:
             base_url=self.url,
             trust_env=False,
             timeout=15,
-            headers={"Authorization": "Bearer " + config["token"]},
         )
 
     def __enter__(self):

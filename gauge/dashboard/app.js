@@ -1,25 +1,27 @@
 (function () {
   'use strict';
-  const form=document.querySelector('#connect-form'),key=document.querySelector('#key'),disconnect=document.querySelector('#disconnect'),state=document.querySelector('#server-state'),picker=document.querySelector('#run');
+  const form=document.querySelector('#connect-form'),disconnect=document.querySelector('#disconnect'),state=document.querySelector('#server-state'),picker=document.querySelector('#run');
   const view=new PixelLab.Dashboard('#app',{title:'Gauge',subtitle:'BACKEND / saved runs + live captures',maxRequests:1000,layout:'comparisons'});
-  let bearer='',runs=[],active=false,generation=0,lastLiveRunId=null;
+  let projectId=new URLSearchParams(window.location.search).get('project_id') || '';
+  const projectPicker=document.querySelector('#project');
+  const scoped=path=>path+(projectId?(path.includes('?')?'&':'?')+'project_id='+encodeURIComponent(projectId):'');
+  let runs=[],active=false,generation=0,lastLiveRunId=null;
   const queuePanel=document.querySelector('#queue-status');
   const validationView=new GaugeValidationSummary(document.querySelector('#validation-summary'));
   const app=document.querySelector('#app'),panel=document.querySelector('#load-state');
   // Keep the library header and its delegated controls at the top of the page.
   view.el.querySelector('.pl-header').after(document.querySelector('.connection'),queuePanel,document.querySelector('#validation-summary'),panel);
   app.hidden=false;
-  function showState(title,message,login=false){
+  function showState(title,message){
     queuePanel.hidden=true;validationView.update(null);
     app.dataset.loading='true';panel.hidden=false;picker.disabled=true;
     document.querySelector('#load-title').textContent=title;
     document.querySelector('#load-message').textContent=message;
-    document.querySelector('#login-help').hidden=!login;
     state.textContent=message;
   }
-  const headers=()=>bearer?{Authorization:`Bearer ${bearer}`}:{ };
+  const headers=()=>({});
   async function loadRuns(){
-    const response=await fetch('/v1/runs',{headers:headers(),credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(5000)});
+    const response=await fetch(scoped('/v1/runs'),{headers:headers(),credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(5000)});
     if(!response.ok){const error=new Error(`Backend returned HTTP ${response.status}.`);error.unauthorized=response.status===401;throw error;}
     return (await response.json()).runs;
   }
@@ -35,9 +37,10 @@
     active=true;disconnect.disabled=false;form.classList.add('session-connected');
     showState('Loading saved results…','Fetching captures and comparisons from the backend.');
     const location=new URL(window.location.href);
+    if(projectId)location.searchParams.set('project_id',projectId);else location.searchParams.delete('project_id');
     if(runId)location.searchParams.set('run',runId);else location.searchParams.delete('run');
     history.replaceState(null,'',location);
-    const source=GaugeDashboard.pollingSource({token:bearer,url:'/v1/dashboard'+(runId?'?run_id='+encodeURIComponent(runId):''),onSnapshot:snapshot=>{
+    const source=GaugeDashboard.pollingSource({url:scoped('/v1/dashboard'+(runId?'?run_id='+encodeURIComponent(runId):'')),onSnapshot:snapshot=>{
       if(current!==generation)return;
       app.dataset.loading='false';panel.hidden=true;picker.disabled=false;
       const selected=runs.find(r=>r.id===runId),s=snapshot.stats,summary=selected?.summary;
@@ -66,6 +69,7 @@
       }
       const judged=snapshot.records.flatMap(row=>row.comparisons || []).map(j=>j.judgment).filter(Boolean);
       const judgeCounts=status=>judged.filter(j=>j.status===status).length;
+      if(s.configuration_note)document.querySelector('#queue-note').textContent+=' '+s.configuration_note;
       document.querySelector('#queue-note').textContent+=` Judging: ${judgeCounts('pending')} queued · ${judgeCounts('running')} active · ${judgeCounts('completed')} decided · ${judgeCounts('uncertain')} uncertain · ${judgeCounts('error')} errors · ${judgeCounts('skipped')} skipped.`;
       const baseline=summary?.baseline?.calls||0,captured=summary?.during_saturation?.calls||0;
       state.textContent=selected
@@ -73,31 +77,31 @@
         : `Queue ${s.queued} · active ${s.active} · ${s.paused?'dispatch paused':'dispatch enabled'} · ${snapshot.loaded}/${snapshot.total} captures`;
       if(!initialized && selected?.status==='completed'){
         const completed=view.requests.find(r=>r.candidates.some(c=>c.status==='succeeded'));
-        if(completed){view.explorer.setFilter('completed');view.select(completed.id);}
+        if(completed){view.explorer.setFilter('all');view.select(completed.id);}
       }
+      if(!initialized && snapshot.loaded && view.requests.every(r=>!r.candidates.length))view.requestDetails.open=true;
       initialized=true;
       loadRuns().then(items=>{if(current===generation)showRuns(items,runId);}).catch(()=>{});
     }});
     view.connect(sink=>source({...sink,error:error=>{
       if(current!==generation)return;
       sink.error(error);
-      const unauthorized=error.message.startsWith('Unauthorized');
-      if(unauthorized)form.classList.remove('session-connected');
-      showState(unauthorized?'Sign in to load saved results':'Results could not be loaded',unauthorized?'This browser is not signed in. Results have not been loaded.':`${error.message} Retrying automatically.`,unauthorized);
+      showState('Results could not be loaded',`${error.message} Retrying automatically.`);
     }}));
   }
-  async function authenticate(){
+  async function connectBackend(){
     const current=++generation;
     view.disconnect();active=false;disconnect.disabled=true;
     showState('Loading saved results…','Connecting to the backend. Counts will appear after results load.');
     try{
-      if(bearer){
-        const response=await fetch('/dashboard/ticket',{method:'POST',headers:headers(),credentials:'same-origin',signal:AbortSignal.timeout(5000)});
-        if(!response.ok){const error=new Error(`Sign-in returned HTTP ${response.status}.`);error.unauthorized=response.status===401;throw error;}
-        const ticket=await response.json();if(current!==generation)return;
-        const session=await fetch(ticket.path,{credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(5000)});
-        if(!session.ok || new URL(session.url).searchParams.get('session')==='expired')throw new Error('Could not establish the dashboard session. Please reconnect.');
-        bearer='';
+      const projectsResponse=await fetch('/v1/projects',{cache:'no-store',signal:AbortSignal.timeout(5000)});
+      if(!projectsResponse.ok)throw new Error('Could not load projects');
+      const projects=(await projectsResponse.json()).projects;
+      if(projects.length){
+        if(projectId && !projects.some(p=>p.id===projectId))throw new Error('Selected project was not found on this backend.');
+        if(!projectId)projectId=projects[0].id;
+        projectPicker.replaceChildren(...projects.map(p=>new Option(p.name,p.id)));
+        projectPicker.value=projectId;projectPicker.disabled=false;
       }
       const items=await loadRuns();if(current!==generation)return;
       const requested=new URLSearchParams(window.location.search).get('run');
@@ -105,15 +109,15 @@
       showRuns(items,selected);connect(selected);
     }catch(error){if(current===generation){
       form.classList.remove('session-connected');
-      const expired=new URLSearchParams(window.location.search).get('session')==='expired';
-      showState(error.unauthorized?'Sign in to load saved results':'Backend connection failed',error.unauthorized?(expired?'That sign-in link expired or was already used. Use your Gauge key above or generate a new link below.':'This browser is not signed in. Results have not been loaded.'):`${error.message} Check that the backend is running, then retry.`,error.unauthorized);
-      view.el.querySelector('.pl-connection').textContent=error.unauthorized?'Unauthorized':'Disconnected';
+      showState('Backend connection failed',`${error.message} Retry when the backend is available.`);
+      view.el.querySelector('.pl-connection').textContent='Disconnected';
     }}
   }
-  document.querySelector('#retry').addEventListener('click',authenticate);
-  form.addEventListener('submit',event=>{event.preventDefault();bearer=key.value.trim();key.value='';authenticate();});
+  document.querySelector('#retry').addEventListener('click',connectBackend);
+  form.addEventListener('submit',event=>{event.preventDefault();connectBackend();});
   picker.addEventListener('change',()=>connect(picker.value));
-  disconnect.addEventListener('click',()=>{generation++;active=false;view.disconnect();view.setData([]);bearer='';form.classList.remove('session-connected');view.notice('Disconnected');view.el.querySelector('.pl-connection').textContent='Disconnected';showState('Dashboard disconnected','Saved runs remain on the backend. Reconnect to load them.');disconnect.disabled=true;});
+  projectPicker.addEventListener('change',()=>{projectId=projectPicker.value;connectBackend();});
+  disconnect.addEventListener('click',()=>{generation++;active=false;view.disconnect();view.setData([]);;form.classList.remove('session-connected');view.notice('Disconnected');view.el.querySelector('.pl-connection').textContent='Disconnected';showState('Dashboard disconnected','Saved runs remain on the backend. Reconnect to load them.');disconnect.disabled=true;});
   window.addEventListener('pagehide',()=>{generation++;if(active)view.disconnect();view.destroy();},{once:true});
-  authenticate();
+  connectBackend();
 })();

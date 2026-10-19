@@ -1,4 +1,4 @@
-"""Operator command routing; optional terminal dependencies load only when invoked."""
+"""Terminal command routing; rendering dependencies load only when invoked."""
 
 from __future__ import annotations
 
@@ -21,19 +21,58 @@ def configure(commands) -> None:
         ("status", "Show backend queues and judge status"),
         ("runs", "List, inspect, export, or clear saved runs"),
         ("judge", "Judge up to 100 saved comparison pairs"),
-        ("dashboard", "Print a browser sign-in link"),
+        ("dashboard", "Open the selected saved run in the browser"),
+        ("requests", "List captured requests, including original-only results"),
+        ("inspect", "Inspect complete request context and outputs"),
+        ("compare", "Dispatch bounded comparisons for saved captures"),
+        ("project", "Show the automatically discovered project"),
+        ("connect", "Connect this project to an internal shared backend"),
+        ("configure", "Set project comparison models and budgets"),
+        ("backend", "Start, inspect, or stop the local service"),
         ("pause", "Pause backend comparison dispatch"),
         ("resume", "Resume backend comparison dispatch"),
     ):
         parser = commands.add_parser(name, help=help_text)
-        parser.add_argument("--connection", type=Path, default=Path(".gauge/backend.json"))
+        parser.add_argument("--connection", type=Path, default=None)
         if name == "tui":
             colors = parser.add_mutually_exclusive_group()
             colors.add_argument("--color", dest="color", action="store_true", help="Enable colors")
             colors.add_argument("--no-color", dest="color", action="store_false", help="Monochrome")
             parser.set_defaults(color=None)
-        if name in {"status", "runs", "judge", "pause", "resume"}:
+        if name in {
+            "status",
+            "runs",
+            "judge",
+            "pause",
+            "resume",
+            "requests",
+            "inspect",
+            "compare",
+            "project",
+            "configure",
+            "backend",
+        }:
             parser.add_argument("--json", action="store_true", help="Machine-readable output")
+        if name == "connect":
+            parser.add_argument("url")
+            parser.add_argument("--project-id")
+        if name == "dashboard":
+            parser.add_argument("run_id", nargs="?")
+            parser.add_argument("--print-only", action="store_true")
+        if name in {"requests", "compare"}:
+            parser.add_argument("run_id", nargs="?")
+        if name == "compare":
+            parser.add_argument("--limit", type=int, default=100)
+        if name == "inspect":
+            parser.add_argument("call_id")
+        if name == "configure":
+            parser.add_argument("--models", nargs="+")
+            parser.add_argument("--automatic", action="store_true")
+            parser.add_argument("--sample-rate", type=float, default=1.0)
+            parser.add_argument("--budget", type=int, default=300)
+            parser.add_argument("--max-output-tokens", type=int, default=2048)
+        if name == "backend":
+            parser.add_argument("operation", choices=["start", "status", "stop"])
         if name == "runs":
             parser.add_argument("operation", choices=["list", "show", "export", "clear"])
             parser.add_argument("run_id", nargs="?")
@@ -50,6 +89,11 @@ def configure(commands) -> None:
 
 def run(args) -> None:
     console = Console()
+    if args.command in {"project", "configure", "backend", "connect"}:
+        from gauge.cli.onboarding import setup_command
+
+        setup_command(args, console)
+        return
     client = ConsoleClient(args.connection)
     result: dict | None
     try:
@@ -63,7 +107,17 @@ def run(args) -> None:
             GaugeConsole(client, color=args.color).run()
             return
         if args.command == "dashboard":
-            print(client.dashboard())
+            url = client.dashboard(args.run_id)
+            print(url)
+            if not args.print_only:
+                import webbrowser
+
+                webbrowser.open(url)
+            return
+        if args.command in {"requests", "inspect", "compare"}:
+            from gauge.cli.onboarding import results_command
+
+            results_command(args, client, console)
             return
         if args.command == "status":
             result = client.snapshot()
@@ -149,4 +203,7 @@ def run_operation(args, client: ConsoleClient, console: Console) -> dict | None:
     if args.json:
         return {"run": next(r for r in runs if r["id"] == args.run_id), "records": records}
     console.print(model_table(records))
+    from gauge.cli.onboarding import request_table
+
+    console.print(request_table(records))
     return None

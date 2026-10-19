@@ -8,7 +8,7 @@ version = "0.1.0a1"
 description = "Capture model calls and compare reference and candidate outputs."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["openai>=3.29,<3.30", "httpx>=0.28,<1", "textual>=6,<9"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "Programming Language :: Python :: 3",
@@ -19,10 +19,14 @@ classifiers = [
 [project.scripts]
 gauge = "gauge.__main__:main"
 
+[project.entry-points.pytest11]
+gauge = "gauge.pytest_plugin"
+
 [project.optional-dependencies]
 openai = ["openai>=3.29,<3.30", "httpx>=0.28,<1"]
 validation = ["openai>=3.29,<3.30", "httpx>=0.28,<1", "pyarrow>=18,<24"]
 dev = ["build>=1.2", "pytest>=8", "ruff>=0.11", "httpx>=0.28", "mypy>=1.15"]
+test = ["pytest>=8", "pytest-xdist>=3"]
 cli = [
     "httpx>=0.28,<1",
     "textual>=6,<9",
@@ -40,6 +44,7 @@ path = "hatch_build.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-p no:gauge"
 
 [tool.ruff]
 target-version = "py311"

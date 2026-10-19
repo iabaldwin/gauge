@@ -1,21 +1,19 @@
-"""Loopback-only live Gauge backend for bounded integration and load tests.
+"""Internal Gauge service. No Gauge authentication; project IDs segment results.
 
-Run with FIREWORKS_API_KEY and GAUGE_API_KEY set. Every accepted comparison uses
-real Fireworks inference. This is a local test service, not a production server.
+Provider credentials are needed only for comparisons/judging. Local capture and
+inspection work without them. Inference runs in this service, never in the SDK.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
-import hmac
 import json
 import os
 import queue
 import secrets
+import sqlite3
 import threading
 import time
-from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
@@ -54,12 +52,24 @@ ASSETS = {
 
 class Backend:
     def __init__(
-        self, db: str, model: str, capacity: int, max_calls: int, workers: int = 1
+        self,
+        db: str,
+        model: str | None,
+        capacity: int,
+        max_calls: int,
+        workers: int = 1,
+        *,
+        project_id: str | None = None,
     ) -> None:
         self.db, self.model, self.max_calls = db, model, max_calls
-        self.models = [model]
+        from gauge.config import comparison_models
+
+        self.models = [model] if model else list(comparison_models(os.environ))
+        self.model = self.models[0]
         self.output_tokens = 256
         self.workers = workers
+        self.project_id = project_id or os.environ.get("GAUGE_PROJECT_ID")
+        self.comparisons_enabled = bool(os.environ.get("FIREWORKS_API_KEY"))
         self.jobs: queue.Queue[dict[str, Any]] = queue.Queue(capacity)
         self.gate = threading.Event()
         self.gate.set()
@@ -80,18 +90,58 @@ class Backend:
         self.dashboard = DashboardStore(db)
         self.judging = JudgeQueue(self.dashboard)
         self.active_run: dict[str, Any] | None = None
-        for index in range(workers):
+        policy_path = Path(db).parent / "settings.json"
+        if policy_path.exists():
+            self.policy = json.loads(policy_path.read_text())
+            self.models = self.policy["models"]
+            self.max_calls = self.policy["budget"]
+            self.output_tokens = self.policy["max_output_tokens"]
+        threading.Thread(target=self.watch, daemon=True, name="gauge-dispatch").start()
+        for index in range(workers if self.comparisons_enabled else 0):
             threading.Thread(
                 target=self.consume, daemon=True, name=f"live-comparisons-{index}"
             ).start()
 
-    def accept(self, raw: bytes, idempotency_key: str | None) -> None:
+    def watch(self) -> None:
+        while True:
+            try:
+                policy = getattr(self, "policy", {})
+                if policy.get("automatic") and self.comparisons_enabled:
+                    self.compare({"limit": 1000})
+            except Exception:
+                with self.lock:
+                    self.stats["dispatch_errors"] = self.stats.get("dispatch_errors", 0) + 1
+            time.sleep(1)
+
+    def configure(self, config: dict) -> dict:
+        from gauge.backend.policy import configure
+
+        return configure(self, config)
+
+    def compare(self, config: dict) -> dict:
+        from gauge.backend.policy import dispatch
+
+        return dispatch(self, config)
+
+    def accept(self, raw: bytes, idempotency_key: str | None, *, compare: bool = True) -> None:
         payload = json.loads(raw)
+        if self.project_id and payload.get("project_id") != self.project_id:
+            raise ValueError("Capture project does not match the selected project")
         if payload.get("call_id") != idempotency_key:
             raise ValueError("Idempotency key mismatch")
         inbox = CaptureInbox(self.db)
         try:
-            call_id, inserted = inbox.accept(raw)
+            run = self.active_run
+            if run is None and payload.get("run_id") and payload.get("project_id"):
+                run = {
+                    "id": payload["run_id"],
+                    "project_id": payload["project_id"],
+                    "name": "Application execution",
+                    "status": "captured",
+                    "kind": "automatic",
+                    "created_at": payload["created_at"],
+                }
+            call_id, inserted = inbox.accept(raw, run=run)
             event = inbox.get(call_id)
         finally:
             inbox.close()
@@ -100,6 +150,8 @@ class Backend:
                 self.stats["duplicates"] += 1
                 return
             self.stats["received"] += 1
+            if not self.comparisons_enabled or not compare:
+                return
             if self.active_run:
                 self.dashboard.attach(call_id, self.active_run["id"])
             messages, reason = None, (event or {}).get("ineligible_reason")
@@ -114,6 +166,8 @@ class Backend:
                 self.stats["ineligible"] += 1
             for model in self.models:
                 job = {
+                    "id": "comparison_" + secrets.token_hex(16),
+                    "attempt_id": "attempt_" + secrets.token_hex(16),
                     "call_id": call_id,
                     "candidate": model,
                     "status": "pending",
@@ -137,9 +191,20 @@ class Backend:
                     self.dashboard.put(job)
 
     def snapshot(self) -> dict[str, Any]:
+        with sqlite3.connect(self.db, timeout=5) as db:
+            counts = dict(
+                db.execute(
+                    "SELECT json_extract(payload, '$.status'), count(*) "
+                    "FROM gauge_comparisons GROUP BY 1"
+                )
+            )
         with self.lock:
             return {
                 **self.stats,
+                "received": self.dashboard.page()["total"],
+                "comparison_jobs": sum(counts.values()),
+                "completed": counts.get("completed", 0),
+                "failed": counts.get("error", 0),
                 "results": list(self.stats["results"]),
                 "queued": self.jobs.qsize(),
                 "paused": not self.gate.is_set(),
@@ -147,6 +212,18 @@ class Backend:
                 "pid": os.getpid(),
                 "workers": self.workers,
                 "models": list(self.models),
+                "project_id": self.project_id,
+                "comparisons_enabled": self.comparisons_enabled,
+                "capture_diagnostics": [
+                    json.loads(p.read_text())
+                    for p in (Path(self.db).parent / "diagnostics").glob("*.json")
+                ],
+                "configuration_note": None
+                if self.comparisons_enabled
+                else (
+                    "Original captures saved. Set FIREWORKS_API_KEY "
+                    "in the backend environment to compare."
+                ),
                 "judging": self.judging.snapshot(),
             }
 
@@ -239,88 +316,104 @@ class Backend:
             return result
 
     def consume(self) -> None:
-        with OpenAI(
-            api_key=os.environ["FIREWORKS_API_KEY"],
-            base_url="https://api.fireworks.ai/inference/v1",
-            max_retries=0,
-            timeout=30,
-            # OpenAI 3.29 accepts HTTPX and HTTPX2, but its annotations list HTTPX2 only.
-            http_client=cast(
-                Any, httpx.Client(proxy=os.environ.get("HTTPS_PROXY"), trust_env=False)
-            ),
-        ) as client:
-            while True:
-                work = self.jobs.get()
-                event, job = work["event"], work["job"]
+        client = None
+        while True:
+            work = self.jobs.get()
+            event, job = work["event"], work["job"]
+            with self.lock:
+                self.stats["active"] += 1
+            self.gate.wait()  # Local fault injection; never blocks HTTP ingestion.
+            started = time.perf_counter()
+            result: dict[str, Any] = dict(job)
+            try:
                 with self.lock:
-                    self.stats["active"] += 1
-                self.gate.wait()  # Local fault injection; never blocks HTTP ingestion.
-                started = time.perf_counter()
-                result: dict[str, Any] = dict(job)
-                try:
-                    with self.lock:
-                        if self.stats["calls_started"] >= self.max_calls:
-                            raise ValueError("Live comparison call budget exhausted")
-                        self.stats["calls_started"] += 1
-                    reference = response_text(event["response"])
-                    result.update(status="running", started_at=time.time())
-                    self.dashboard.put(result)
-                    parameters: dict[str, Any] = {
-                        "model": job["candidate"],
-                        "messages": work["messages"],
-                        "max_tokens": job["max_output_tokens"],
-                    }
-                    if "gpt-oss" in job["candidate"]:
-                        parameters["reasoning_effort"] = "low"
-                    output = client.chat.completions.create(**parameters)
-                    candidate = output.choices[0].message.content
-                    result.update(
-                        input=work["messages"][-1]["content"],
-                        reference=reference,
-                        candidate_output=candidate,
-                        finish_reason=output.choices[0].finish_reason,
-                        agreement=(reference == candidate)
-                        if output.choices[0].finish_reason == "stop"
-                        else None,
-                        usage=output.usage.model_dump() if output.usage else None,
-                        status="completed",
-                    )
-                except Exception as exc:
-                    result.update(
-                        status="error",
-                        error=type(exc).__name__,
-                        http_status=getattr(exc, "status_code", None),
-                    )
-                result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
-                result["finished_at"] = time.time()
-                try:
-                    self.dashboard.put(result)
-                except Exception:
-                    # A reporting failure must not kill the comparison worker.
-                    with self.lock:
-                        self.stats["dashboard_write_errors"] = (
-                            self.stats.get("dashboard_write_errors", 0) + 1
-                        )
+                    if (
+                        not job.get("configuration_id")
+                        and self.stats["calls_started"] >= self.max_calls
+                    ):
+                        raise ValueError("Live comparison call budget exhausted")
+                    self.stats["calls_started"] += 1
+                reference = response_text(event["response"])
+                result.update(status="running", started_at=time.time())
+                self.dashboard.put(result)
+                parameters: dict[str, Any] = {
+                    "model": job["candidate"],
+                    "messages": work["messages"],
+                    "max_tokens": job["max_output_tokens"],
+                }
+                if "gpt-oss" in job["candidate"]:
+                    parameters["reasoning_effort"] = "low"
+                client = client or OpenAI(
+                    api_key=os.environ["FIREWORKS_API_KEY"],
+                    base_url="https://api.fireworks.ai/inference/v1",
+                    max_retries=0,
+                    timeout=30,
+                    http_client=cast(
+                        Any, httpx.Client(proxy=os.environ.get("HTTPS_PROXY"), trust_env=False)
+                    ),
+                )
+                output = client.chat.completions.create(**parameters)
+                candidate = output.choices[0].message.content
+                result.update(
+                    input=work["messages"][-1]["content"],
+                    reference=reference,
+                    candidate_output=candidate,
+                    finish_reason=output.choices[0].finish_reason,
+                    agreement=(reference == candidate)
+                    if output.choices[0].finish_reason == "stop"
+                    else None,
+                    usage=output.usage.model_dump() if output.usage else None,
+                    status="completed",
+                )
+            except Exception as exc:
+                result.update(
+                    status="error",
+                    error=type(exc).__name__,
+                    http_status=getattr(exc, "status_code", None),
+                )
+            result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+            result["finished_at"] = time.time()
+            try:
+                self.dashboard.put(result)
+            except Exception:
+                # A reporting failure must not kill the comparison worker.
                 with self.lock:
-                    self.stats["active"] -= 1
-                    self.stats["completed" if result["status"] == "completed" else "failed"] += 1
-                    self.stats["results"].append(result)
-                try:
-                    self.judging.submit(event, result, work["messages"])
-                except Exception:
-                    # Judge scheduling/storage is optional and must not kill comparison workers.
-                    pass
-                self.jobs.task_done()
+                    self.stats["dashboard_write_errors"] = (
+                        self.stats.get("dashboard_write_errors", 0) + 1
+                    )
+            with self.lock:
+                self.stats["active"] -= 1
+                self.stats["completed" if result["status"] == "completed" else "failed"] += 1
+                self.stats["results"].append(result)
+            try:
+                self.judging.submit(event, result, work["messages"])
+            except Exception:
+                # Judge scheduling/storage is optional and must not kill comparison workers.
+                pass
+            self.jobs.task_done()
 
 
-def serve(port: int, db: str, model: str, capacity: int, max_calls: int, workers: int = 1) -> None:
-    token = os.environ["GAUGE_API_KEY"]
-    if not token or not os.environ.get("FIREWORKS_API_KEY"):
-        raise ValueError("GAUGE_API_KEY and FIREWORKS_API_KEY must be configured")
-    backend = Backend(db, model, capacity, max_calls, workers)
-    session = hmac.new(token.encode(), b"gauge-dashboard-read-session", hashlib.sha256).hexdigest()
-    tickets: dict[str, float] = {}
-    ticket_lock = threading.Lock()
+def serve(
+    port: int,
+    db: str,
+    model: str | None,
+    capacity: int,
+    max_calls: int,
+    workers: int = 1,
+    *,
+    projects_dir: str | None = None,
+    host: str = "127.0.0.1",
+) -> None:
+    from gauge.backend.projects import ProjectRegistry
+
+    default_backend = Backend(db, model, capacity, max_calls, workers)
+    registry = ProjectRegistry(
+        Path(projects_dir) if projects_dir else None,
+        default_backend,
+        lambda path, project: Backend(
+            path, model, capacity, max_calls, workers, project_id=project
+        ),
+    )
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args: Any) -> None:
@@ -339,46 +432,9 @@ def serve(port: int, db: str, model: str, capacity: int, max_calls: int, workers
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
-        def authorized(self, read_only: bool = False) -> bool:
-            if read_only:
-                cookie = SimpleCookie()
-                try:
-                    cookie.load(self.headers.get("Cookie", ""))
-                    value = cookie.get("gauge_dashboard")
-                    if value and hmac.compare_digest(value.value, session):
-                        return True
-                except (ValueError, TypeError):
-                    pass
-            if not hmac.compare_digest(self.headers.get("Authorization", ""), f"Bearer {token}"):
-                self.reply(401, {"error": "unauthorized"})
-                return False
-            return True
-
         def do_GET(self) -> None:
             parsed = urlsplit(self.path)
             path, query = parsed.path, parse_qs(parsed.query)
-            if path == "/dashboard/session":
-                with ticket_lock:
-                    expires = tickets.pop(query.get("ticket", [""])[0], 0)
-                if expires < time.time():
-                    self.send_response(303)
-                    self.send_header("Location", "/dashboard?session=expired")
-                    self.send_header("Cache-Control", "no-store")
-                    self.send_header("Referrer-Policy", "no-referrer")
-                    self.send_header("Content-Length", "0")
-                    self.end_headers()
-                    return
-                self.send_response(303)
-                self.send_header("Location", "/dashboard")
-                self.send_header(
-                    "Set-Cookie",
-                    f"gauge_dashboard={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800",
-                )
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Referrer-Policy", "no-referrer")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
             if path in ASSETS:
                 file, mime = ASSETS[path]
                 try:
@@ -406,7 +462,13 @@ def serve(port: int, db: str, model: str, capacity: int, max_calls: int, workers
                 except (BrokenPipeError, ConnectionResetError):
                     pass
                 return
-            if not self.authorized(read_only=path in {"/v1/dashboard", "/v1/runs", "/v1/traces"}):
+            if path == "/v1/projects":
+                self.reply(200, {"projects": registry.list()})
+                return
+            try:
+                backend = registry.select(query.get("project_id", [None])[0])
+            except ValueError as exc:
+                self.reply(400, {"error": str(exc)})
                 return
             if path == "/stats":
                 stats = backend.snapshot()
@@ -445,19 +507,6 @@ def serve(port: int, db: str, model: str, capacity: int, max_calls: int, workers
                 self.reply(404, {})
 
         def do_POST(self) -> None:
-            if not self.authorized():
-                return
-            if self.path == "/dashboard/ticket":
-                ticket = secrets.token_urlsafe(32)
-                with ticket_lock:
-                    for old, expiry in list(tickets.items()):
-                        if expiry < time.time():
-                            tickets.pop(old)
-                    if len(tickets) >= 20:
-                        tickets.pop(next(iter(tickets)))
-                    tickets[ticket] = time.time() + 1800
-                self.reply(200, {"path": "/dashboard/session?ticket=" + ticket, "expires_in": 1800})
-                return
             self.connection.settimeout(3)
             try:
                 length = int(self.headers.get("Content-Length", "0"))
@@ -467,26 +516,54 @@ def serve(port: int, db: str, model: str, capacity: int, max_calls: int, workers
                 raw = self.rfile.read(length)
                 if len(raw) != length:
                     raise ValueError("Incomplete body")
-                if self.path == "/v1/runs/start":
+                parsed = urlsplit(self.path)
+                path = parsed.path
+                config = json.loads(raw)
+                if not isinstance(config, dict):
+                    raise ValueError("JSON object required")
+                if path == "/v1/projects":
+                    self.reply(201, {"project": registry.create(config)})
+                    return
+                project_id = parse_qs(parsed.query).get("project_id", [config.get("project_id")])[0]
+                backend = registry.select(project_id)
+                if path == "/v1/config":
+                    self.reply(200, backend.configure(json.loads(raw)))
+                elif path == "/v1/comparisons":
+                    self.reply(202, backend.compare(json.loads(raw)))
+                elif path == "/v1/runs/start":
                     self.reply(201, {"run": backend.start_run(json.loads(raw))})
-                elif self.path == "/v1/runs/end":
+                elif path == "/v1/runs/end":
                     backend.end_run(json.loads(raw))
                     self.reply(200, {"saved": True})
-                elif self.path in {"/v1/runs/clear/preview", "/v1/runs/clear"}:
+                elif path in {"/v1/runs/clear/preview", "/v1/runs/clear"}:
                     self.reply(
                         200,
-                        backend.maintain_runs(json.loads(raw), clear=self.path == "/v1/runs/clear"),
+                        backend.maintain_runs(json.loads(raw), clear=path == "/v1/runs/clear"),
                     )
-                elif self.path == "/control":
+                elif path == "/control":
                     paused = json.loads(raw)["paused"]
                     if type(paused) is not bool:
                         raise ValueError("paused must be boolean")
                     backend.gate.clear() if paused else backend.gate.set()
                     self.reply(200, backend.snapshot())
-                elif self.path == "/v1/captures":
-                    backend.accept(raw, self.headers.get("Idempotency-Key"))
+                elif path == "/v1/runs/import":
+                    if (
+                        config.get("project_id") != backend.project_id
+                        or not isinstance(config.get("id"), str)
+                        or not isinstance(config.get("name"), str)
+                        or config.get("status") not in {"captured", "completed", "failed"}
+                    ):
+                        raise ValueError("Invalid imported run")
+                    backend.dashboard.save_run(config)
+                    self.reply(200, {"saved": True})
+                elif path in {"/v1/captures", "/v1/import"}:
+                    backend.accept(
+                        raw,
+                        self.headers.get("Idempotency-Key"),
+                        compare=path == "/v1/captures" and backend.active_run is not None,
+                    )
                     self.reply(202, {"accepted": True})
-                elif self.path == "/v1/judgments":
+                elif path == "/v1/judgments":
                     config = json.loads(raw)
                     limit = config.get("limit", 30)
                     run_id, call_id = config.get("run_id"), config.get("call_id")
@@ -518,7 +595,7 @@ def serve(port: int, db: str, model: str, capacity: int, max_calls: int, workers
             except Exception:
                 self.reply(503, {"error": "ingestion unavailable"})
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
     print(json.dumps({"ready": True, "port": server.server_port}), flush=True)
     try:
@@ -531,7 +608,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--db", default="out/gauge-local.sqlite")
-    parser.add_argument("--model", default="accounts/fireworks/models/gpt-oss-120b")
+    parser.add_argument("--model")
+    parser.add_argument("--projects-dir")
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--capacity", type=int, default=1)
     parser.add_argument("--max-calls", type=int, default=8)
     parser.add_argument("--workers", type=int, default=1)
@@ -541,7 +620,16 @@ def main() -> None:
     if not 1 <= args.workers <= 16:
         parser.error("Comparison workers must be 1–16")
     Path(args.db).parent.mkdir(parents=True, exist_ok=True)
-    serve(args.port, args.db, args.model, args.capacity, args.max_calls, args.workers)
+    serve(
+        args.port,
+        args.db,
+        args.model,
+        args.capacity,
+        args.max_calls,
+        args.workers,
+        projects_dir=args.projects_dir,
+        host=args.host,
+    )
 
 
 if __name__ == "__main__":

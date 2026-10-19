@@ -203,7 +203,10 @@ def test_terminal_keyboard_inspection_and_clear_cancel(tmp_path):
             assert isinstance(app.screen, InspectDialog)
             await pilot.press("escape")
             await pilot.press("d")
-            await pilot.pause(0.2)
+            for _ in range(40):
+                await pilot.pause(0.05)
+                if isinstance(app.screen, ClearDialog):
+                    break
             assert isinstance(app.screen, ClearDialog)
             assert app.screen.query_one("#confirm-clear", Button).disabled
             app.screen.query_one("#clear-confirm", Input).value = "CLEAR"

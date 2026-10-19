@@ -81,7 +81,7 @@ def test_cli_renders_saved_report_and_refuses_overwriting_input(tmp_path, monkey
 
 
 def test_default_models_and_environment_overrides():
-    assert len(comparison_models({})) == 2
+    assert len(comparison_models({})) == 3
     assert comparison_models({}) == DEFAULT_FIREWORKS_MODELS
     assert comparison_models({"FIREWORKS_MODELS": " a, b, a, "}) == ("a", "b")
     assert comparison_models({"FIREWORKS_MODEL": "preferred"}) == (

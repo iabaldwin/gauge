@@ -48,43 +48,38 @@ keep your application code. The original result returns without waiting for comp
 
 ## Quick start
 
-Install from the repository root:
+Install from the repository root, or install the wheel produced by the release build:
 
 ```sh
-python -m pip install './gauge[openai]'
+python -m pip install ./gauge
 ```
 
-Then change the import in your application:
+Change the import in your application:
 
 ```diff
 -from openai import OpenAI, AsyncOpenAI
 +from gauge.openai import OpenAI, AsyncOpenAI
 ```
 
-Keep your existing client construction and `responses.create(...)` or
-`chat.completions.create(...)` calls. To instrument an existing client instead:
-
-```python
-import gauge
-
-client = gauge.wrap(existing_client)
-```
-
-Configure delivery through your application environment:
+Keep construction and client calls unchanged. Run your normal pytest command, then:
 
 ```sh
-export GAUGE_ENDPOINT="https://your-gauge-backend/v1/captures"
-export GAUGE_API_KEY="your-gauge-ingestion-token"
+pytest
+gauge requests
+gauge inspect CALL_ID
+gauge tui
+gauge dashboard
 ```
 
-Without an endpoint, captures stay local. Use `GAUGE_ENABLED=0` to disable capture.
-No caller annotations, correlation fields, flush calls, or shutdown changes are required.
+No Gauge account, key, endpoint, manual run, or browser setup. Automatic pytest
+integration groups the test execution and delivers pending captures at teardown.
+The SDK persists captures on its bounded background worker. Terminal tooling starts
+the separate local service when needed and reads the same `.gauge/captures.sqlite`.
 
-The core experiment runner has no runtime dependencies. The `openai` extra provides
-the native client integration and dependencies for the local backend. Gauge uses
-PEP 517/621 packaging, a `src` layout, and a PEP 561 typing marker. It is local and
-unpublished; `pip install gauge` is not the installation route for this project.
-For development, add `-e` to the install command.
+The default distribution includes the client and terminal tooling. Optional extras
+supply validation/development dependencies. Builds use PEP 517/621, a `src` layout,
+and PEP 561 typing. The first release is built locally; no public-index publication
+has been performed. See [release instructions](docs/releasing.md).
 
 ## How it works
 
@@ -127,7 +122,6 @@ A Pixel Lab terminal workspace for live queues, saved runs, model comparisons,
 output inspection, judging, export, and previewed cleanup:
 
 ```sh
-pip install 'gauge[cli]'
 gauge tui
 ```
 
@@ -142,10 +136,9 @@ results, and saved runs in SQLite. Model summaries lead the view; inspect a resp
 pair for its full request, output, and timing. Filter by model, status, or output
 text, and explore latency and token distributions.
 
-For local service setup, sign-in, and saturation tests, see the
+For local service setup and evaluation configuration, see the
 [backend dashboard guide](dashboard/README.md). The packaged backend can run with
-`python -m gauge.backend`; service management helpers live in the repository's
-`tools/` directory. This package does not deploy a hosted service.
+`python -m gauge.backend`; installed service management uses `gauge backend`. This package does not deploy a hosted service.
 
 Preview a standalone report with synthetic data and no provider calls:
 
@@ -179,29 +172,21 @@ limits drop captures. Setup failure rolls back instrumentation and leaves the
 native client usable. There is still small bookkeeping and shared-process CPU
 cost; this is not a zero-overhead or hard real-time guarantee.
 
-**Backend delivery configuration** belongs in deployment configuration, not
-application call sites:
+Captures persist locally by default. The automatic pytest plugin flushes pending
+captures at teardown with a five-second budget; application code needs no flush or
+shutdown calls. Short-lived applications outside pytest retain best-effort delivery.
+Queue contention, limits, abrupt process exit, or storage failure can lose captures;
+pytest writes delivery diagnostics under `.gauge/diagnostics`, exposed by `gauge status`.
 
-```sh
-export GAUGE_ENDPOINT="https://your-gauge-backend/v1/captures"
-export GAUGE_API_KEY="your-gauge-ingestion-token"
-```
+To connect a project to an internal shared backend, use `gauge connect URL`.
+For explicit direct delivery, configure `GAUGE_ENDPOINT` and `GAUGE_PROJECT_ID`
+in the environment. Gauge does not use authentication tokens. The independent
+export client never uses the provider client or its connection pool. It has bounded
+retries/timeouts and a circuit breaker and never waits for an evaluation.
 
-Without `GAUGE_ENDPOINT`, capture stays local. With it, a daemon exports to that
-exact endpoint using independent HTTP connections and only the Gauge token. It
-never uses the OpenAI client, credentials, or connection pool. The default is a
-2-second timeout per network operation, at most one retry, and a 30-second circuit
-break after three failed events. Redirects are not followed and acknowledgement
-bodies are not consumed. Only HTTPS is accepted, except for loopback development.
-No backend acknowledgement or evaluation is awaited by the application.
-
-Set `GAUGE_ENABLED=0` to disable capture, including on already-wrapped clients.
-Environment changes do not cancel exports already in flight. `captures.dropped`,
-`failed`, `exported`, and `export_dropped` expose best-effort counters. `dropped`
-includes local diagnostic-history evictions, so it is not an export-loss count. Configure
-endpoint/token before client construction; existing exporters keep their config.
-`flush()` / `drain()` exist for diagnostics/tests and are never required or called
-by the wrapper. Pending events may be lost on exit; no durable SDK spool is kept.
+Set `GAUGE_ENABLED=0` to disable capture. `GAUGE_STORAGE=memory` selects temporary
+in-memory diagnostics instead of local persistence. Configure delivery before client
+construction; running workers retain their configuration.
 
 Forked children discard inherited Gauge locks/queues and drop captures until a
 client is constructed or wrapped there; native calls continue. Client setup also

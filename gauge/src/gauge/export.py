@@ -22,7 +22,6 @@ class HTTPExporter:
         self,
         endpoint: str,
         *,
-        api_key: str | None = None,
         timeout: float = 2,
         max_retries: int = 1,
         failure_threshold: int = 3,
@@ -55,6 +54,7 @@ class HTTPExporter:
             or not 1 <= cooldown <= 300
         ):
             raise ValueError("Invalid bounded export policy")
+        self._identity: dict[str, str] = {}
         self.endpoint = endpoint
         self.max_retries = max_retries
         self.failure_threshold = failure_threshold
@@ -67,7 +67,6 @@ class HTTPExporter:
             follow_redirects=False,
             trust_env=False,
             transport=transport,
-            headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
         )
 
     @classmethod
@@ -75,12 +74,21 @@ class HTTPExporter:
         endpoint = os.environ.get("GAUGE_ENDPOINT", "")
         if not endpoint or os.environ.get("GAUGE_ENABLED", "1") == "0":
             return None
-        return cls(endpoint, api_key=os.environ.get("GAUGE_API_KEY"))
+        exporter = cls(endpoint)
+        if os.environ.get("GAUGE_STORAGE") != "memory":
+            from gauge.local.state import bootstrap, installation_id
+
+            exporter._identity = {
+                "project_id": os.environ.get("GAUGE_PROJECT_ID") or bootstrap()["project_id"],
+                "installation_id": installation_id(),
+            }
+        return exporter
 
     def send(self, payload: dict[str, Any]) -> bool:
         if time.monotonic() < self._open_until:
             return False
         # Input was bounded and decoded by the capture worker. No user objects here.
+        payload = {**payload, **getattr(self, "_identity", {})}
         body = json.dumps(
             payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")
         ).encode()

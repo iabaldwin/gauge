@@ -7,3 +7,8 @@ def isolate_capture_configuration(monkeypatch):
     for name in ("GAUGE_ENDPOINT", "GAUGE_API_KEY", "GAUGE_ENABLED"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("GAUGE_JUDGE", "off")
+    monkeypatch.setenv("GAUGE_STORAGE", "memory")
+    monkeypatch.setenv(
+        "GAUGE_HOME",
+        str(__import__("pathlib").Path(__import__("tempfile").gettempdir()) / "gauge-unit-home"),
+    )

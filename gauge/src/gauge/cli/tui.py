@@ -205,7 +205,14 @@ class GaugeConsole(App):
             common = (
                 request_title(capture) + capture["call_id"] + response_text(capture.get("response"))
             )
-            for job in record.get("comparisons", []):
+            jobs = record.get("comparisons", []) or [
+                {
+                    "candidate": "Original only",
+                    "status": "original",
+                    "reason": "Comparisons have not been dispatched for this capture.",
+                }
+            ]
+            for job in jobs:
                 searchable = common + job["candidate"] + str(job.get("candidate_output", ""))
                 if query and query not in searchable.casefold():
                     continue
@@ -275,9 +282,9 @@ class GaugeConsole(App):
 
     def action_dashboard(self) -> None:
         def open_dashboard():
-            webbrowser.open(self.client.dashboard())
+            webbrowser.open(self.client.dashboard(self.selected_run))
 
-        self.run_worker(self.operate(open_dashboard, "Opened browser sign-in link"))
+        self.run_worker(self.operate(open_dashboard, "Opened saved results in the browser"))
 
     def action_clear(self) -> None:
         if self.selected_run:

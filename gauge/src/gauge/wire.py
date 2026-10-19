@@ -135,6 +135,8 @@ class CaptureEvent:
     provider_request_id: str | None = None
     endpoint_host: str | None = None
     attempts: int = 0
+    run_id: str | None = None
+    process_id: str | None = None
 
     @property
     def size_bytes(self) -> int:
@@ -161,6 +163,8 @@ class CaptureEvent:
                 else "no_completed_response"
             )
         return {
+            "run_id": self.run_id,
+            "process_id": self.process_id,
             "schema_version": SCHEMA_VERSION,
             "call_id": self.id,
             "operation": self.operation,
