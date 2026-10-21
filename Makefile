@@ -2,15 +2,41 @@
 
 UV ?= uv
 DIST_DIR ?= dist
+STRESS_OUTPUT_DIR ?= out/stress
+STRESS_SOURCE_MODEL ?=
+STRESS_MODELS ?= accounts/fireworks/models/qwen3p8-max accounts/fireworks/models/gpt-oss-120b accounts/fireworks/models/deepseek-v4p1-flash
 
-.PHONY: help build wheel check-dist check-wheel
+.PHONY: help build wheel check-dist check-wheel stress-small stress-medium stress-large
 
 help:
 	@printf '%s\n' \
 	  'make build        Build wheel and source distribution with bundled UI checks' \
 	  'make wheel        Alias for build' \
 	  'make check-dist   Build and validate distribution metadata' \
-	  'make check-wheel  Validate and install the wheel in a temporary environment'
+	  'make check-wheel  Validate and install the wheel in a temporary environment' \
+	  'make stress-small   Live saturation: 20 OpenAI calls, 3 Fireworks candidates' \
+	  'make stress-medium  Live saturation: 200 OpenAI calls, 3 Fireworks candidates' \
+	  'make stress-large   Live saturation: 1000 OpenAI calls, 3 Fireworks candidates'
+
+stress-small: STRESS_CALLS = 20
+stress-small: STRESS_CONCURRENCY = 4
+stress-small: STRESS_CAPACITY = 6
+stress-medium: STRESS_CALLS = 200
+stress-medium: STRESS_CONCURRENCY = 10
+stress-medium: STRESS_CAPACITY = 24
+stress-large: STRESS_CALLS = 1000
+stress-large: STRESS_CONCURRENCY = 20
+stress-large: STRESS_CAPACITY = 96
+
+stress-small stress-medium stress-large:
+	@test -n "$$FIREWORKS_API_KEY" || { printf '%s\n' 'Set FIREWORKS_API_KEY before starting the stress backend.' >&2; exit 1; }
+	$(UV) run --project gauge python tools/live_gauge_saturation.py \
+	  --mode saturation --calls $(STRESS_CALLS) --baseline-calls 4 \
+	  --concurrency $(STRESS_CONCURRENCY) --comparison-capacity $(STRESS_CAPACITY) \
+	  --comparison-max-calls 3000 \
+	  $(foreach model,$(STRESS_MODELS),--candidate-model "$(model)") \
+	  $(if $(STRESS_SOURCE_MODEL),--source-model "$(STRESS_SOURCE_MODEL)") \
+	  --output "$(STRESS_OUTPUT_DIR)/$@-$$(date +%Y%m%d-%H%M%S).json"
 
 build:
 	$(UV) run --no-project --with build python tools/build_gauge_release.py --output "$(DIST_DIR)"

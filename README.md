@@ -64,6 +64,34 @@ For an internal shared backend, run `python -m gauge.backend --projects-dir PATH
 on the server and use `gauge connect https://YOUR-INTERNAL-GAUGE` locally. Project
 namespaces have separate stores and budgets; there is no Gauge authentication.
 
+## Live saturation tests
+
+```sh
+make stress-small   # 20 OpenAI calls, concurrency 4
+make stress-medium  # 200 OpenAI calls, concurrency 10
+make stress-large   # 1,000 OpenAI calls, concurrency 20
+```
+
+These targets make paid provider calls. Configure `OPENAI_API_KEY`, or
+`PORTKEY_API_KEY` and `PORTKEY_BASE_URL`, plus `FIREWORKS_API_KEY` before starting
+the backend. If a backend is already running without comparison credentials,
+stop it with `gauge backend stop` first; the runner starts it again.
+
+Each run includes four native baseline calls; the remaining calls use Gauge.
+All three default Fireworks candidates are configured. The runner pauses the
+comparison workers to fill a bounded queue, verifies that OpenAI still completes,
+and resumes comparisons. Dropped comparison jobs are expected in this saturation
+test; it does not evaluate every original against every candidate.
+
+Requests and results persist in the project's backend database. Timestamped reports
+are saved under `out/stress/`, and the runner prints a link to the run's dashboard.
+Open the latest run with `gauge dashboard`.
+
+Override the source model with `STRESS_SOURCE_MODEL=MODEL_ID`, the space-separated
+candidate list with `STRESS_MODELS="MODEL_ID ..."`, or the report directory with
+`STRESS_OUTPUT_DIR=PATH`. The runner defaults to `gpt-4.1-nano` with an OpenAI key
+or `@openai-foundations/gpt-5.4-mini` through Portkey.
+
 ## Build a distribution
 
 ```sh

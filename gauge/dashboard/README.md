@@ -75,6 +75,23 @@ Pass `project_id` as a query parameter on shared-service calls. Ingestion can al
 select the namespace using the capture's project ID. There is no Authorization
 header, session cookie, ticket, or login endpoint.
 
+## Storage outages
+
+Finished comparisons and judgments remain visible when their final SQLite write
+fails. The dashboard and CLI show a storage warning; affected records expose
+`persistence.status = "retrying"`, and `/stats` reports `pending_result_writes`.
+Only writes are retried, with backoff capped at 30 seconds. The original provider
+response, judgment, and attempt IDs are retained; inference is never replayed.
+
+Each backend worker retains at most one finished outcome and waits for persistence
+before taking another job. A prolonged storage outage therefore slows backend
+work and can fill its bounded queues without blocking the application's OpenAI
+calls. Once storage recovers, writes finish and workers resume automatically.
+
+Outcomes awaiting storage are held in memory, not yet durable. If the service is
+terminated before a successful write, restart marks the old unfinished records
+unavailable rather than repeating paid inference.
+
 ## Verify without inference
 
 ```sh

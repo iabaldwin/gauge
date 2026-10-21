@@ -215,6 +215,25 @@ def main():
             trust_env=False,
             timeout=3,
         ) as control:
+            previous = control.get("/stats").json()
+            if previous.get("comparisons_enabled") is False:
+                raise RuntimeError(
+                    "Backend comparisons are disabled. Set FIREWORKS_API_KEY, "
+                    "stop the idle backend with gauge backend stop, then retry."
+                )
+            totals = {
+                key: previous.get(key, 0)
+                for key in ("received", "comparison_jobs", "completed", "failed")
+            }
+            report["backend_before_run"] = totals
+
+            def run_stats():
+                snapshot = control.get("/stats").json()
+                return {
+                    **snapshot,
+                    **{key: snapshot.get(key, 0) - value for key, value in totals.items()},
+                }
+
             response = control.post(
                 "/v1/runs/start",
                 json={
@@ -278,7 +297,7 @@ def main():
             )
             # Test-controller diagnostics only; adopting application code never flushes.
             report["capture_export_drained"] = captures.flush(timeout=60)
-            report["backend_while_paused"] = control.get("/stats").json()
+            report["backend_while_paused"] = run_stats()
             report["capture_metrics"] = {
                 "exported": captures.exported,
                 "failed": captures.failed,
@@ -291,7 +310,7 @@ def main():
             deadline = time.monotonic() + args.comparison_wait_seconds
             next_progress = 0.0
             while True:
-                stats = control.get("/stats").json()
+                stats = run_stats()
                 if not stats["active"] and not stats["queued"]:
                     break
                 if time.monotonic() >= deadline:

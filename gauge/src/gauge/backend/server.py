@@ -11,7 +11,6 @@ import json
 import os
 import queue
 import secrets
-import sqlite3
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -191,13 +190,8 @@ class Backend:
                     self.dashboard.put(job)
 
     def snapshot(self) -> dict[str, Any]:
-        with sqlite3.connect(self.db, timeout=5) as db:
-            counts = dict(
-                db.execute(
-                    "SELECT json_extract(payload, '$.status'), count(*) "
-                    "FROM gauge_comparisons GROUP BY 1"
-                )
-            )
+        counts = self.dashboard.comparison_counts()
+        pending_writes = len(self.dashboard.reporting.snapshot())
         with self.lock:
             return {
                 **self.stats,
@@ -214,11 +208,17 @@ class Backend:
                 "models": list(self.models),
                 "project_id": self.project_id,
                 "comparisons_enabled": self.comparisons_enabled,
+                "pending_result_writes": pending_writes,
                 "capture_diagnostics": [
                     json.loads(p.read_text())
                     for p in (Path(self.db).parent / "diagnostics").glob("*.json")
                 ],
-                "configuration_note": None
+                "configuration_note": (
+                    f"{pending_writes} finished result(s) awaiting storage. "
+                    "Outputs are available in memory; backend workers are retrying writes."
+                )
+                if pending_writes
+                else None
                 if self.comparisons_enabled
                 else (
                     "Original captures saved. Set FIREWORKS_API_KEY "
@@ -373,14 +373,7 @@ class Backend:
                 )
             result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
             result["finished_at"] = time.time()
-            try:
-                self.dashboard.put(result)
-            except Exception:
-                # A reporting failure must not kill the comparison worker.
-                with self.lock:
-                    self.stats["dashboard_write_errors"] = (
-                        self.stats.get("dashboard_write_errors", 0) + 1
-                    )
+            self.dashboard.finish_comparison(result)
             with self.lock:
                 self.stats["active"] -= 1
                 self.stats["completed" if result["status"] == "completed" else "failed"] += 1
