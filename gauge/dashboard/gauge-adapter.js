@@ -29,8 +29,8 @@
     if(message)return typeof message.content==='string' && !message.tool_calls?.length && !message.function_call && !message.audio;
     return Array.isArray(response?.output) && response.output.some(x=>x.type==='message') && response.output.every(x=>x.type==='reasoning' || (x.type==='message' && x.content?.every(p=>p.type==='output_text')));
   }
-  function toRequest({capture: e, comparisons, comparison}) {
-    if (!e || typeof e.call_id !== 'string') throw new TypeError('Invalid Gauge capture');
+  function toRequest({capture: e, comparisons}) {
+    if (!e || typeof e.call_id !== 'string' || !Array.isArray(comparisons)) throw new TypeError('Invalid Gauge capture');
     const start = numeric(e.created_at) ?? 0, latency = numeric(e.latency_ms);
     const finish=e.response?.choices?.[0]?.finish_reason;
     const originalIncomplete=e.status==='completed' && ((finish!=null && finish!=='stop') || (e.response?.status!=null && e.response.status!=='completed'));
@@ -41,7 +41,7 @@
     const spans = [];
     if (latency !== null) spans.push({id:'original',name:'Original inference',kind:'original',startMs:0,durationMs:latency,status:originalStatus});
     const candidates = [];
-    const jobs=comparisons ?? (comparison?[comparison]:[]);
+    const jobs=comparisons;
     for (const job of jobs) {
       const incomplete=job.status==='completed' && job.finish_reason!=null && job.finish_reason!=='stop';
       const status = incomplete?'skipped':({completed:'succeeded',error:'failed',pending:'pending',running:'running',skipped:'skipped'})[job.status];
@@ -73,7 +73,7 @@
     }
     return {id:e.call_id,name:title(e.request || {},e.call_id),startedAt:start*1000,captured:true,input:e.request,original,candidates,spans,
       metadata:{operation:e.operation,providerRequestId:e.provider_request_id,captureStatus:e.status,replayEligible:e.replay_eligible,ineligibleReason:e.ineligible_reason,
-        comparisonHistory:jobs.length ? 'tracked' : 'unavailable; capture predates dashboard tracking',timing:'Backend offsets use wall clocks; original duration is measured.'}};
+        comparisonHistory:jobs.length ? 'tracked' : 'No comparisons dispatched',timing:'Backend offsets use wall clocks; original duration is measured.'}};
   }
   function pollingSource({intervalMs=1500,timeoutMs=5000,onSnapshot=()=>{},fetchImpl=globalThis.fetch.bind(globalThis),url='/v1/dashboard'} = {}) {
     return sink => {
@@ -86,7 +86,7 @@
           const response=await fetchImpl(url,options);
           if(!response.ok) throw new Error(`Dashboard HTTP ${response.status}`);
           const snapshot=await response.json();
-          if(![1,2].includes(snapshot.schema_version) || !Array.isArray(snapshot.records)) throw new Error('Unsupported dashboard feed');
+          if(snapshot.schema_version!==2 || !Array.isArray(snapshot.records)) throw new Error('Unsupported dashboard feed');
           let cursor=snapshot.next_cursor;
           while(cursor!=null && snapshot.records.length<1000){
             const separator=url.includes('?')?'&':'?';

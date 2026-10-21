@@ -14,8 +14,7 @@ def comparison_models(environ: Mapping[str, str]) -> tuple[str, ...]:
     if "FIREWORKS_MODELS" in environ:
         models = [item.strip() for item in environ["FIREWORKS_MODELS"].split(",") if item.strip()]
     else:
-        preferred = environ.get("FIREWORKS_MODEL", "").strip()
-        models = [*([preferred] if preferred else []), *DEFAULT_FIREWORKS_MODELS]
+        models = list(DEFAULT_FIREWORKS_MODELS)
     if not models:
         raise ValueError("FIREWORKS_MODELS must contain at least one model ID.")
     return tuple(dict.fromkeys(models))

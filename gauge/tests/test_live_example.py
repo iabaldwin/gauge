@@ -56,7 +56,7 @@ def test_live_example_checks_candidate_before_generation_or_reference(monkeypatc
     module = load_example()
     generation = AsyncMock(side_effect=AssertionError("Generation must not run"))
     monkeypatch.setattr(module, "generate_cases", generation)
-    for key in ("OPENAI_API_KEY", "FIREWORKS_API_KEY", "FIREWORKS_MODEL"):
+    for key in ("OPENAI_API_KEY", "FIREWORKS_API_KEY"):
         monkeypatch.setenv(key, "test")
     monkeypatch.setenv("FIREWORKS_MODELS", "model-a,model-b")
 

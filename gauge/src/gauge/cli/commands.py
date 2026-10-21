@@ -132,7 +132,6 @@ def run(args) -> None:
             return
         if args.command in {"pause", "resume"}:
             result = client.request("POST", "/control", {"paused": args.command == "pause"})
-            result.pop("results", None)
         elif args.command == "judge":
             result = client.judge(args.run_id, args.limit)
         else:

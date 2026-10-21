@@ -1,9 +1,10 @@
-"""Gauge artifact tools and optional backend operator console."""
+"""Gauge artifact tools and backend operator console."""
 
 import argparse
 import json
 from pathlib import Path
 
+from gauge.cli.commands import configure
 from gauge.models import Report
 
 
@@ -15,21 +16,9 @@ def main() -> None:
     render.add_argument("--output", type=Path)
     demo = commands.add_parser("demo", help="Render clearly labeled illustrative data")
     demo.add_argument("--output", type=Path, default=Path("gauge-comparison.html"))
-    # Keep artifact commands available without installing console dependencies.
-    from importlib.util import find_spec
-
-    console_available = find_spec("textual") is not None and find_spec("httpx") is not None
-    if console_available:
-        from gauge.cli.commands import configure
-
-        configure(commands)
-    else:
-        for name in ("tui", "status", "runs", "judge", "dashboard", "pause", "resume"):
-            commands.add_parser(name, help="Requires gauge[cli]")
+    configure(commands)
     args = parser.parse_args()
     if args.command not in {"report", "demo"}:
-        if not console_available:
-            parser.error("Install the operator console: pip install 'gauge[cli]'")
         from gauge.cli.client import ConsoleError
         from gauge.cli.commands import run
 

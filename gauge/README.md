@@ -259,11 +259,11 @@ python gauge/examples/offline.py
 ```
 
 The provider example makes paid requests only when explicitly run. It reads
-`OPENAI_API_KEY` and `FIREWORKS_API_KEY`. By default it compares Terra against both
-`accounts/fireworks/models/qwen3p8-max` and `accounts/fireworks/models/gpt-oss-120b`.
+`OPENAI_API_KEY` and `FIREWORKS_API_KEY`. By default it compares Terra against
+`accounts/fireworks/models/qwen3p8-max`, `accounts/fireworks/models/gpt-oss-120b`,
+and `accounts/fireworks/models/deepseek-v4p1-flash`.
 `GAUGE_REFERENCE_MODEL` overrides `gpt-5.6-terra`; comma-separated `FIREWORKS_MODELS`
-replaces the candidate list. The legacy singular `FIREWORKS_MODEL` adds a preferred
-model to the defaults (duplicates are removed).
+replaces the candidate list (duplicates are removed).
 
 ```sh
 python gauge/examples/openai_fireworks.py
@@ -273,8 +273,8 @@ The configured clients are caller-owned and closed by the example. It disables
 SDK retries so call bounds match attempts, limits output tokens, and writes a
 local JSON report and a standalone HTML comparison table. Each candidate is probed
 before synthetic generation. Unavailable candidates are skipped and recorded in
-the report; if all fail, generation/reference calls do not start. With both default
-candidates available, 20 cases make 63 logical calls including probes and generation.
+the report; if all fail, generation/reference calls do not start. With all three default
+candidates available, 20 cases make 84 logical calls including probes and generation.
 It prints
 per-target error/status counts and the report path, and exits unsuccessfully if
 no comparisons were scored. `firectl list models` includes catalog models that may
@@ -350,11 +350,11 @@ Install with `python -m pip install './gauge[validation]'` and run
 ## Development
 
 ```sh
-uv sync --project gauge --extra openai --extra dev
-uv run --project gauge --extra openai --extra dev pytest gauge/tests
+uv sync --project gauge --extra dev
+uv run --project gauge --extra dev pytest gauge/tests
 uv run --project gauge --extra dev ruff check gauge
 uv run --project gauge --extra dev ruff format --check gauge
-uv run --project gauge --extra openai --extra dev mypy gauge/src/gauge
+uv run --project gauge --extra dev mypy gauge/src/gauge
 uv build gauge
 ```
 

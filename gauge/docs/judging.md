@@ -74,7 +74,7 @@ gauge/.venv/bin/python tools/gauge_backend.py judge --run-id RUN_ID --limit 30
 gauge/.venv/bin/python tools/gauge_backend.py judge --call-id CALL_ID --limit 3
 ```
 
-The authenticated `POST /v1/judgments` endpoint accepts `run_id`, `call_id`, and
+The `POST /v1/judgments` endpoint accepts `run_id`, `call_id`, and
 `limit` (1–100, default 30). Selection starts with the newest eligible saved
 pairs. Completed and uncertain judgments using the current rubric are not resubmitted.
 Older rubric versions and failed/skipped judgments can be retried explicitly.

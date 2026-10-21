@@ -23,14 +23,9 @@ gauge = "gauge.__main__:main"
 gauge = "gauge.pytest_plugin"
 
 [project.optional-dependencies]
-openai = ["openai>=3.29,<3.30", "httpx>=0.28,<1"]
-validation = ["openai>=3.29,<3.30", "httpx>=0.28,<1", "pyarrow>=18,<24"]
-dev = ["build>=1.2", "pytest>=8", "ruff>=0.11", "httpx>=0.28", "mypy>=1.15"]
+validation = ["pyarrow>=18,<24"]
+dev = ["build>=1.2", "pytest>=8", "ruff>=0.11", "mypy>=1.15"]
 test = ["pytest>=8", "pytest-xdist>=3"]
-cli = [
-    "httpx>=0.28,<1",
-    "textual>=6,<9",
-]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gauge"]

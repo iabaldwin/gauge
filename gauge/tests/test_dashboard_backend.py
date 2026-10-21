@@ -249,7 +249,7 @@ def test_run_pages_include_older_results_and_survive_restart(backend_module, tmp
 def test_run_exclusivity_and_completion(backend_module, monkeypatch, tmp_path):
     monkeypatch.setattr(backend_module.Backend, "consume", lambda self: None)
     backend = backend_module.Backend(str(tmp_path / "runs.sqlite"), "candidate", 1, 2)
-    config = {"model": "candidate", "capacity": 2, "max_calls": 3}
+    config = {"models": ["candidate"], "capacity": 2, "max_calls": 3}
     run = backend.start_run(config)
     with pytest.raises(backend_module.CaptureConflict):
         backend.start_run(config)

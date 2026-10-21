@@ -23,7 +23,7 @@ def test_loopback_ingestion_contract_without_provider_calls(tmp_path):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env={**os.environ, "GAUGE_API_KEY": "local-test-token", "FIREWORKS_API_KEY": "unused"},
+        env={**os.environ, "FIREWORKS_API_KEY": "unused"},
     )
     try:
         with selectors.DefaultSelector() as selector:
@@ -37,7 +37,6 @@ def test_loopback_ingestion_contract_without_provider_calls(tmp_path):
             assert client.get("/v1/dashboard").status_code == 200
             shell = client.get("/dashboard")
             assert shell.status_code == 200
-            assert "local-test-token" not in shell.text
             assert "frame-ancestors 'none'" in shell.headers["Content-Security-Policy"]
             assert client.get("/pixel-lab/pixel-lab.js").status_code == 200
             assert client.get("/dashboard/gauge-adapter.js").status_code == 200
@@ -62,6 +61,7 @@ def test_loopback_ingestion_contract_without_provider_calls(tmp_path):
             assert client.post("/v1/captures", json=item, headers=headers).status_code == 202
             stats = client.get("/stats").json()
             assert stats["received"] == stats["duplicates"] == 1
+            assert "results" not in stats
             assert stats["comparison_jobs"] == 0
             assert stats["calls_started"] == stats["queued"] == 0
             feed = client.get("/v1/dashboard")

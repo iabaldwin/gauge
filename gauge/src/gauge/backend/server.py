@@ -60,11 +60,10 @@ class Backend:
         *,
         project_id: str | None = None,
     ) -> None:
-        self.db, self.model, self.max_calls = db, model, max_calls
+        self.db, self.max_calls = db, max_calls
         from gauge.config import comparison_models
 
         self.models = [model] if model else list(comparison_models(os.environ))
-        self.model = self.models[0]
         self.output_tokens = 256
         self.workers = workers
         self.project_id = project_id or os.environ.get("GAUGE_PROJECT_ID")
@@ -83,7 +82,6 @@ class Backend:
             "active": 0,
             "completed": 0,
             "failed": 0,
-            "results": [],
         }
         CaptureInbox(db).close()
         self.dashboard = DashboardStore(db)
@@ -199,7 +197,6 @@ class Backend:
                 "comparison_jobs": sum(counts.values()),
                 "completed": counts.get("completed", 0),
                 "failed": counts.get("error", 0),
-                "results": list(self.stats["results"]),
                 "queued": self.jobs.qsize(),
                 "paused": not self.gate.is_set(),
                 "active_run_id": self.active_run["id"] if self.active_run else None,
@@ -229,7 +226,7 @@ class Backend:
 
     def start_run(self, config: dict[str, Any]) -> dict[str, Any]:
         capacity, budget = config["capacity"], config["max_calls"]
-        models = config.get("models", [config.get("model")])
+        models = config["models"]
         output_tokens = config.get("max_output_tokens", 256)
         if (
             type(capacity) is not int
@@ -252,7 +249,6 @@ class Backend:
                 "name": str(config.get("name", "Saturation test"))[:100],
                 "created_at": time.time(),
                 "status": "running",
-                "model": models[0],
                 "models": models,
                 "workers": self.workers,
                 "max_output_tokens": output_tokens,
@@ -261,10 +257,10 @@ class Backend:
             self.active_run = run
             with self.jobs.mutex:
                 self.jobs.maxsize = capacity
-            self.models, self.model, self.max_calls = list(models), models[0], budget
+            self.models, self.max_calls = list(models), budget
             self.output_tokens = output_tokens
             for key in self.stats:
-                self.stats[key] = [] if key == "results" else 0
+                self.stats[key] = 0
             self.gate.set()
             return run
 
@@ -312,7 +308,6 @@ class Backend:
             if ids is None:
                 raise ValueError("Clear requires the exact run_ids returned by preview")
             result = maintenance.clear(ids, fingerprint)
-            self.stats["results"].clear()
             return result
 
     def consume(self) -> None:
@@ -377,7 +372,6 @@ class Backend:
             with self.lock:
                 self.stats["active"] -= 1
                 self.stats["completed" if result["status"] == "completed" else "failed"] += 1
-                self.stats["results"].append(result)
             try:
                 self.judging.submit(event, result, work["messages"])
             except Exception:
@@ -464,10 +458,7 @@ def serve(
                 self.reply(400, {"error": str(exc)})
                 return
             if path == "/stats":
-                stats = backend.snapshot()
-                if query.get("summary") == ["1"]:
-                    stats.pop("results", None)
-                self.reply(200, stats)
+                self.reply(200, backend.snapshot())
             elif path == "/v1/runs":
                 self.reply(200, {"runs": backend.dashboard.runs()})
             elif path == "/v1/traces":
@@ -481,7 +472,6 @@ def serve(
             elif path == "/v1/dashboard":
                 try:
                     stats = backend.snapshot()
-                    stats.pop("results", None)
                     self.reply(
                         200,
                         {

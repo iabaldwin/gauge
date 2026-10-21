@@ -109,21 +109,21 @@ class Report:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Report:
-        """Load native reports, including older reports without normalized token fields."""
-        if data.get("schema_version", "0.1") != "0.1":
+        """Load the current report schema and recompute derived usage counters."""
+        if data.get("schema_version") != "0.1":
             raise ValueError("Unsupported report schema version.")
         outcomes = []
         for item in data["outcomes"]:
-            raw = item.get("output")
+            raw = item["output"]
             output = (
                 None
                 if raw is None
                 else ModelOutput(
-                    text=raw.get("text"),
-                    status=raw.get("status", "completed"),
-                    request=raw.get("request", {}),
-                    response=raw.get("response", {}),
-                    usage=raw.get("usage", {}),
+                    text=raw["text"],
+                    status=raw["status"],
+                    request=raw["request"],
+                    response=raw["response"],
+                    usage=raw["usage"],
                 )
             )
             outcomes.append(
@@ -132,8 +132,8 @@ class Report:
                     target=item["target"],
                     latency_ms=item["latency_ms"],
                     output=output,
-                    error=item.get("error"),
-                    error_status_code=item.get("error_status_code"),
+                    error=item["error"],
+                    error_status_code=item["error_status_code"],
                 )
             )
         comparisons = [
@@ -141,7 +141,7 @@ class Report:
                 case_id=item["case_id"],
                 candidate=item["candidate"],
                 agreement=Grade(**item["agreement"]),
-                assessment=Grade(**item["assessment"]) if item.get("assessment") else None,
+                assessment=Grade(**item["assessment"]) if item["assessment"] is not None else None,
             )
             for item in data["comparisons"]
         ]
@@ -154,8 +154,8 @@ class Report:
             cases=[Case(**item) for item in data["cases"]],
             outcomes=outcomes,
             comparisons=comparisons,
-            metadata=data.get("metadata", {}),
-            reference_is_ground_truth=data.get("reference_is_ground_truth", False),
+            metadata=data["metadata"],
+            reference_is_ground_truth=data["reference_is_ground_truth"],
         )
 
     def to_html(self) -> str:

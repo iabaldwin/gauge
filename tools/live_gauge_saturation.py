@@ -122,6 +122,22 @@ def summarize(results):
     }
 
 
+def saved_comparisons(control, run_id):
+    """Read this run's persisted jobs, including all dashboard pages."""
+    comparisons, cursor = [], None
+    while True:
+        params = {"run_id": run_id}
+        if cursor is not None:
+            params["before"] = cursor
+        response = control.get("/v1/dashboard", params=params)
+        response.raise_for_status()
+        page = response.json()
+        comparisons.extend(job for row in page["records"] for job in row["comparisons"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            return comparisons
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -231,7 +247,10 @@ def main():
                 snapshot = control.get("/stats").json()
                 return {
                     **snapshot,
-                    **{key: snapshot.get(key, 0) - value for key, value in totals.items()},
+                    **{
+                        key: snapshot.get(key, 0) - value
+                        for key, value in totals.items()
+                    },
                 }
 
             response = control.post(
@@ -330,6 +349,8 @@ def main():
                     next_progress = time.monotonic() + 15
                 time.sleep(0.5)
             report["backend_after_recovery"] = stats
+            comparisons = saved_comparisons(control, run_id)
+            report["comparisons"] = comparisons
             report["checks"] = {
                 "all_openai_calls_completed": all(
                     r["status"] == "completed" for r in baseline + results
@@ -342,7 +363,7 @@ def main():
                 "backend_saturated_or_load_mode": args.mode == "load"
                 or report["backend_while_paused"]["queue_dropped"] > 0,
                 "real_fireworks_comparisons_completed": any(
-                    r.get("agreement") is not None for r in stats["results"]
+                    r.get("agreement") is not None for r in comparisons
                 ),
                 "all_accepted_comparisons_succeeded": (
                     stats["failed"] == 0
@@ -366,7 +387,7 @@ def main():
                         any(
                             r.get("candidate") == model
                             and r.get("agreement") is not None
-                            for r in stats["results"]
+                            for r in comparisons
                         )
                         for model in models
                     ),
@@ -401,7 +422,7 @@ def main():
                     base_url=backend_url,
                     trust_env=False,
                     timeout=5,
-                        ) as control:
+                ) as control:
                     control.post("/control", json={"paused": False}).raise_for_status()
                     control.post(
                         "/v1/runs/end", json={"run_id": run_id, "report": summary}

@@ -146,28 +146,17 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-cli = [
-    { name = "httpx" },
-    { name = "textual" },
-]
 dev = [
     { name = "build" },
-    { name = "httpx" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "ruff" },
-]
-openai = [
-    { name = "httpx" },
-    { name = "openai" },
 ]
 test = [
     { name = "pytest" },
     { name = "pytest-xdist" },
 ]
 validation = [
-    { name = "httpx" },
-    { name = "openai" },
     { name = "pyarrow" },
 ]
 
@@ -175,23 +164,16 @@ validation = [
 requires-dist = [
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2" },
     { name = "httpx", specifier = ">=0.28,<1" },
-    { name = "httpx", marker = "extra == 'cli'", specifier = ">=0.28,<1" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28" },
-    { name = "httpx", marker = "extra == 'openai'", specifier = ">=0.28,<1" },
-    { name = "httpx", marker = "extra == 'validation'", specifier = ">=0.28,<1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.15" },
     { name = "openai", specifier = ">=3.29,<3.30" },
-    { name = "openai", marker = "extra == 'openai'", specifier = ">=3.29,<3.30" },
-    { name = "openai", marker = "extra == 'validation'", specifier = ">=3.29,<3.30" },
     { name = "pyarrow", marker = "extra == 'validation'", specifier = ">=18,<24" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.11" },
     { name = "textual", specifier = ">=6,<9" },
-    { name = "textual", marker = "extra == 'cli'", specifier = ">=6,<9" },
 ]
-provides-extras = ["openai", "validation", "dev", "test", "cli"]
+provides-extras = ["validation", "dev", "test"]
 
 [[package]]
 name = "h11"
@@ -220,8 +202,8 @@ name = "httpcore2"
 version = "2.13.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "python_full_version < '3.12' or sys_platform != 'emscripten'" },
-    { name = "truststore", marker = "python_full_version < '3.12' or sys_platform != 'emscripten'" },
+    { name = "h11" },
+    { name = "truststore" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cb/f3/1db7aa2bc2524062192bb0e0323969492d1883152a232fe36eea65f4e35c/httpcore2-2.13.1.tar.gz", hash = "sha256:e0aa977abe17e69a3b820a24542a6fa88702676d83880b8d194dcd18408e5103", size = 68071, upload-time = "2026-09-23T07:47:22.372Z" }
 wheels = [
