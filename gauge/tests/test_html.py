@@ -52,17 +52,16 @@ def test_report_escapes_payloads_and_does_not_expand_user_placeholders():
     assert report_requests(report)[0]["original"]["tokens"]["answer"] is None
 
 
-def test_report_round_trip_recomputes_usage_and_loads_old_reports():
+def test_report_round_trip_recomputes_derived_usage():
     report = demo_report()
     data = json.loads(report.to_json())
     assert Report.from_dict(data) == report
-    data.pop("metadata")
     data["token_summary"] = {"incorrect": 99999}
     for item in data["outcomes"]:
-        item["output"].pop("token_usage")
+        item["output"]["token_usage"] = {"incorrect": 99999}
     loaded = Report.from_dict(data)
     assert loaded.token_summary() == report.token_summary()
-    assert loaded.metadata == {}
+    assert loaded == report
     with pytest.raises(ValueError, match="schema"):
         Report.from_dict({**data, "schema_version": "999"})
 
@@ -84,9 +83,5 @@ def test_default_models_and_environment_overrides():
     assert len(comparison_models({})) == 3
     assert comparison_models({}) == DEFAULT_FIREWORKS_MODELS
     assert comparison_models({"FIREWORKS_MODELS": " a, b, a, "}) == ("a", "b")
-    assert comparison_models({"FIREWORKS_MODEL": "preferred"}) == (
-        "preferred",
-        *DEFAULT_FIREWORKS_MODELS,
-    )
     with pytest.raises(ValueError, match="at least one"):
         comparison_models({"FIREWORKS_MODELS": " , "})

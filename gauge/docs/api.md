@@ -56,8 +56,8 @@ excluded; full successful JSON bodies, including application metadata, are retai
 Enqueue never waits for the queue lock or capacity. Failure/backpressure only loses
 capture. The daemon uses a dedicated HTTP client, finite retry count, timeouts, and a
 circuit breaker. It never runs candidate models or graders. `GAUGE_ENDPOINT` enables
-export, `GAUGE_API_KEY` supplies ingestion authentication, and `GAUGE_ENABLED=0`
-disables capture. See [the wire/ingestion contract](ingestion.md).
+direct export to a separate backend; otherwise captures persist locally.
+`GAUGE_ENABLED=0` disables capture. Gauge requires no authentication. See [the wire/ingestion contract](ingestion.md).
 
 `flush(timeout=5)` optionally waits for submissions made before the call; `drain()`
 returns available events. Neither is called by inference. `close()` never joins.
@@ -137,7 +137,7 @@ Clients remain caller-owned. `Report.diagnostics()` groups failure and response
 statuses by target. The live example separately probes each candidate before any
 generation/reference calls; failed candidates are skipped and retained in report
 metadata. If all fail, the job stops. These probes are outside the experiment's call
-limit. The default policy selects Qwen3.8 Max and GPT-OSS 120B; `FIREWORKS_MODELS`
+limit. The default policy selects Qwen3.8 Max, GPT-OSS 120B, and DeepSeek v4.1 Flash; `FIREWORKS_MODELS`
 overrides it with a comma-separated list. Catalog model availability is not inference availability.
 
 ## Report and grading lineage
@@ -146,8 +146,8 @@ overrides it with a comma-separated list. Catalog model availability is not infe
 instructions, target descriptions, ordered outcomes, and comparisons. Each outcome
 retains latency, native request/response and usage, or an error classification.
 `Report.to_json()` produces the backend interchange representation.
-`Report.from_dict()` loads schema 0.1 reports, including older reports without token
-breakdowns, and recomputes derived token counters. `Report.to_html()` produces a
+`Report.from_dict()` loads the current report schema and recomputes derived token
+counters from provider usage. `Report.to_html()` produces a
 self-contained escaped HTML report with search, filters, and all model columns.
 The local CLI `python -m gauge report <path.json>` renders saved results without
 inference; `python -m gauge demo` renders explicitly illustrative data. No prices are
@@ -221,10 +221,10 @@ Reported non-reasoning tokens need not equal visible answer tokens; see
 
 ## Next implementation milestones
 
-1. Deploy the separate ingestion service, enforce tenant authentication/quotas, and connect
-   eligible original captures to backend candidate dispatch; add configurable sampling.
-2. Conservative automatic call grouping and capture-to-dataset generation.
-3. Complete streaming/parse/raw helper compatibility matrix and Portkey adapter.
+1. Deploy the implemented project-scoped service on shared internal infrastructure.
+   Capture ingestion, candidate dispatch, sampling, and budgets are implemented; Gauge has no auth.
+2. Capture-to-dataset generation using the existing correlation evidence.
+3. Extend capture coverage for streamed outputs and the native Portkey SDK.
 4. Automatic rubric proposals, independent judge calibration, labeled holdouts,
    adjudication of disagreements, and uncertainty-aware recommendations.
 

@@ -23,7 +23,7 @@ def ensure_service(root: Path | None = None) -> dict:
             config = json.loads(state.read_text())
             try:
                 with httpx.Client(timeout=1, trust_env=False) as client:
-                    health = client.get(config["url"] + "/stats?summary=1").json()
+                    health = client.get(config["url"] + "/stats").json()
                 if (
                     health.get("project_id") == project["project_id"]
                     and config.get("db") == project["database"]

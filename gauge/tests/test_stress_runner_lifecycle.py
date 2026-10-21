@@ -14,6 +14,7 @@ def test_runner_saves_run_without_managing_server(monkeypatch, tmp_path, phase_f
     import live_gauge_saturation as runner
 
     posts = []
+    pages = []
 
     class Response:
         def __init__(self, payload):
@@ -40,7 +41,25 @@ def test_runner_saves_run_without_managing_server(monkeypatch, tmp_path, phase_f
             posts.append((path, json))
             return Response({"run": {"id": "run_test"}})
 
-        def get(self, path):
+        def get(self, path, *, params=None):
+            if path == "/v1/dashboard":
+                assert params["run_id"] == "run_test"
+                pages.append(params)
+                first = "before" not in params
+                return Response(
+                    {
+                        "records": [
+                            {
+                                "comparisons": [
+                                    {"agreement": True, "candidate": model, "status": "completed"}
+                                    for model in (("one",) if first else ("two", "three"))
+                                ]
+                            }
+                        ],
+                        "next_cursor": 42 if first else None,
+                    }
+                )
+            assert path == "/stats"
             self.snapshots += 1
             previous = {"received": 100, "completed": 200, "failed": 3}
             if self.snapshots == 1:
@@ -54,9 +73,6 @@ def test_runner_saves_run_without_managing_server(monkeypatch, tmp_path, phase_f
                     "ineligible": 0,
                     "completed": previous["completed"] + (24 if mode == "load" else 2),
                     "failed": previous["failed"],
-                    "results": [
-                        {"agreement": True, "candidate": model} for model in ("one", "two", "three")
-                    ],
                 }
             )
 
@@ -68,9 +84,7 @@ def test_runner_saves_run_without_managing_server(monkeypatch, tmp_path, phase_f
             for _ in range(count)
         ]
 
-    monkeypatch.setattr(
-        runner, "settings", lambda: {"url": "http://127.0.0.1:8765", "token": "test"}
-    )
+    monkeypatch.setattr(runner, "settings", lambda: {"url": "http://127.0.0.1:8765"})
     monkeypatch.setattr(runner, "source_settings", lambda: None)
     monkeypatch.setattr(runner, "phase", phase)
     monkeypatch.setattr(runner.httpx, "Client", Control)
@@ -117,6 +131,9 @@ def test_runner_saves_run_without_managing_server(monkeypatch, tmp_path, phase_f
     assert report["dashboard_url"] == "http://127.0.0.1:8765/dashboard?run=run_test"
     assert bool(report.get("test_error")) is phase_fails
     if not phase_fails:
+        assert pages == [{"run_id": "run_test"}, {"run_id": "run_test", "before": 42}]
+        assert [job["candidate"] for job in report["comparisons"]] == ["one", "two", "three"]
+        assert "results" not in report["backend_after_recovery"]
         assert report["backend_after_recovery"]["failed"] == 0
         assert report["backend_after_recovery"]["received"] == (8 if mode == "load" else 4)
         assert all(report["checks"].values())

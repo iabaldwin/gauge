@@ -113,7 +113,6 @@ and internal-registry publishing. The package is not published to a public index
 - [Backend and dashboard](gauge/dashboard/README.md): `gauge/src/gauge/backend/`, `gauge/dashboard/`.
 - [Standalone Pixel Lab library](pixel-lab/README.md): `pixel-lab/`.
 - [Validation suite](gauge/docs/validation.md): `gauge/src/gauge/validation/`.
-- [Onboarding implementation plan](ONBOARD.md).
 - [Discovery research](research/README.md): `research/`.
 
 ## Verify

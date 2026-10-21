@@ -7,9 +7,9 @@ const {once}=require('node:events');
 const {pathToFileURL}=require('node:url');
 (async()=>{
   const root=path.resolve(__dirname,'../../..'),temp=mkdtempSync(path.join(tmpdir(),'gauge-ui-'));
-  let server,browser,api;const token='test-dashboard-only';
+  let server,browser,api;
   async function start(){
-    server=spawn(path.join(root,'gauge/.venv/bin/python'),[path.join(__dirname,'fixture_server.py'),path.join(temp,'inbox.sqlite')],{env:{...process.env,GAUGE_API_KEY:token,FIREWORKS_API_KEY:'unused-fixture-key',GAUGE_JUDGE:'off'},stdio:['ignore','pipe','pipe']});
+    server=spawn(path.join(root,'gauge/.venv/bin/python'),[path.join(__dirname,'fixture_server.py'),path.join(temp,'inbox.sqlite')],{env:{...process.env,FIREWORKS_API_KEY:'unused-fixture-key',GAUGE_JUDGE:'off'},stdio:['ignore','pipe','pipe']});
     return await new Promise((resolve,reject)=>{
       let output='',errors='';const timer=setTimeout(()=>reject(new Error(`Startup timeout: ${errors}`)),10000);
       server.stderr.on('data',data=>errors+=data);
@@ -21,7 +21,7 @@ const {pathToFileURL}=require('node:url');
   const capture=(i,name='Dish soap')=>({schema_version:'1',call_id:`call_${i.toString(16).padStart(32,'0')}`,operation:'chat.completions.create',created_at:Date.now()/1000-.1,latency_ms:100,status:'completed',attempts:1,reference_source:'original_response',request:{model:'test/openai-reference',messages:[{role:'user',content:name}]},response:{choices:[{finish_reason:'stop',message:{content:'household'}}],usage:{prompt_tokens:10,completion_tokens:5,completion_tokens_details:{reasoning_tokens:0}}}});
   try{
     const port=await start(),url=`http://127.0.0.1:${port}`;
-    api=await request.newContext({baseURL:url,extraHTTPHeaders:{Authorization:`Bearer ${token}`}});
+    api=await request.newContext({baseURL:url});
     browser=await chromium.launch({headless:true,executablePath:process.env.PIXEL_LAB_CHROME||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
     const page=await browser.newPage({viewport:{width:1600,height:1000}}),errors=[];
     page.on('pageerror',e=>{errors.push(e.message);console.error('PAGE_ERROR',e.message);});
@@ -34,7 +34,7 @@ const {pathToFileURL}=require('node:url');
     await expect(page.locator('#key')).toHaveCount(0);
     await page.reload();
     await expect(page.locator('.pl-connection')).toContainText('Connected');
-    const run=(await (await api.post('/v1/runs/start',{data:{name:'Saved fixture run',model:'test/fireworks-candidate',capacity:1,max_calls:8}})).json()).run;
+    const run=(await (await api.post('/v1/runs/start',{data:{name:'Saved fixture run',models:['test/fireworks-candidate'],capacity:1,max_calls:8}})).json()).run;
     const first=capture(1);
     first.request.messages=[{role:'system',content:'Use the supplied catalogue.'},{role:'developer',content:'Return a category.'},{role:'user',content:'Look up dish soap.'},{role:'assistant',content:'Household cleaning supplies'},...first.request.messages];
     expect((await api.post('/v1/captures',{data:first,headers:{'Idempotency-Key':first.call_id}})).status()).toBe(202);
@@ -114,7 +114,7 @@ const {pathToFileURL}=require('node:url');
     await expect(page.locator('.pl-header')).toBeVisible();
     // Restart the actual HTTP service against the same durable database.
     await stop();const newPort=await start();await api.dispose();
-    api=await request.newContext({baseURL:`http://127.0.0.1:${newPort}`,extraHTTPHeaders:{Authorization:`Bearer ${token}`}});
+    api=await request.newContext({baseURL:`http://127.0.0.1:${newPort}`});
     const recovered=(await (await api.get('/v1/dashboard')).json()).records;
     expect(recovered.find(r=>r.capture.call_id===first.call_id).comparisons[0].status).toBe('completed');
     expect(recovered.find(r=>r.capture.call_id===capture(3).call_id).comparisons[0].status).toBe('completed');
@@ -137,8 +137,8 @@ const {pathToFileURL}=require('node:url');
     await offline.locator('[data-inspect]').first().click();
     await expect(offline.getByLabel('Request inspector',{exact:true})).toBeVisible();
     expect(offlineErrors).toEqual([]);await offline.close();
-    expect((await (await api.get('/stats?summary=1')).json()).results).toBeUndefined();
-    // Run cleanup is authenticated, previewed, and backed up; this database is a disposable fixture.
+    expect((await (await api.get('/stats')).json()).results).toBeUndefined();
+    // Run cleanup is previewed and backed up; this database is a disposable fixture.
     expect((await page.request.post(`http://127.0.0.1:${newPort}/v1/runs/clear/preview`,{data:{run_ids:[run.id]}})).status()).toBe(200);
     const preview=(await (await api.post('/v1/runs/clear/preview',{data:{run_ids:[run.id]}})).json());
     expect(preview.captures).toBe(5);expect(preview.comparisons).toBe(5);

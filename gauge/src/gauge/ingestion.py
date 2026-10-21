@@ -1,7 +1,7 @@
 """Backend-only validation and durable idempotent inbox; never imported by capture.
 
-An HTTP handler should enforce MAX_ENVELOPE_BYTES while reading, authenticate the
-producer, call accept(), then acknowledge. Comparison workers read eligible rows
+An HTTP handler should enforce MAX_ENVELOPE_BYTES while reading, select the project
+namespace, call accept(), then acknowledge. Comparison workers read eligible rows
 and correlate their results by call_id. No inference is performed at ingestion.
 """
 

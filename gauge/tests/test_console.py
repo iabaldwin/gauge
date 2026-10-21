@@ -109,16 +109,19 @@ def test_backend_requires_idle_before_clear(tmp_path, busy):
     assert len(store.runs()) == 2
 
 
-def test_console_export_pagination_auth_and_error_redaction(tmp_path):
+def test_console_export_pagination_and_project_scope(tmp_path):
     from gauge.cli.client import ConsoleClient, export_run
 
     connection = tmp_path / "connection.json"
-    connection.write_text(json.dumps({"url": "http://127.0.0.1:8765", "token": "secret-token"}))
+    connection.write_text(
+        json.dumps({"url": "http://127.0.0.1:8765", "project_id": "project_test"})
+    )
     client = ConsoleClient(connection)
     client.http.close()
 
     def handler(request):
-        assert request.headers["authorization"] == "Bearer secret-token"
+        assert request.url.params["project_id"] == "project_test"
+        assert "authorization" not in request.headers
         if request.url.path == "/v1/runs":
             return httpx.Response(200, json={"runs": [{"id": "run_1"}]})
         older = "before" in request.url.params
@@ -133,11 +136,9 @@ def test_console_export_pagination_auth_and_error_redaction(tmp_path):
     client.http = httpx.Client(
         base_url=client.url,
         transport=httpx.MockTransport(handler),
-        headers={"Authorization": "Bearer secret-token"},
     )
     output = export_run(client, "run_1", tmp_path / "export.json")
     assert len(json.loads(output.read_text())["records"]) == 2
-    assert "secret-token" not in output.read_text()
     with pytest.raises(FileExistsError):
         export_run(client, "run_1", output)
     client.close()

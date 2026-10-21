@@ -64,8 +64,7 @@ class ConsoleClient:
 
     def snapshot(self, run_id: str | None = None) -> dict:
         runs = self.request("GET", "/v1/runs")["runs"]
-        stats = self.request("GET", "/stats?summary=1")
-        stats.pop("results", None)
+        stats = self.request("GET", "/stats")
         return {"runs": runs, "stats": stats}
 
     def records(self, run_id: str | None) -> list[dict]:

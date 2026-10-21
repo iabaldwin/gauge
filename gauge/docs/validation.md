@@ -61,7 +61,7 @@ requests. The dispatcher builds these independent cases, and the backend compare
 each case normally. No response-chain or Conversation IDs are required. The
 report audits every captured request against its recorded prefix.
 
-Without that flag, the legacy protocol-validation profile uses two smoke / 25
+Without that flag, the protocol-validation profile uses two smoke / 25
 full excerpts across four protocols: Chat Completions with full history,
 Responses with full history, Responses with `previous_response_id`, and Responses
 with Conversations. That profile uses generated replies in live continuations.
@@ -168,7 +168,7 @@ Expected comparison counts for fixed prefixes:
 | Smoke | 50 | 150 | 150 |
 | Full | 1,000 | 3,000 | 3,000 |
 
-The legacy protocol-validation profile deliberately skips remote Conversations:
+The protocol-validation profile deliberately skips remote Conversations:
 
 | Profile | Original captures | Candidate jobs | Completed if providers succeed | Deliberately skipped |
 | --- | ---: | ---: | ---: | ---: |
@@ -189,7 +189,7 @@ they do not require every model answer to be correct.
 
 A full run makes up to 1,000 source model calls and 3,000 candidate calls. Fixed
 prefixes cap source output at 1,024 tokens and candidate output at 2,048 tokens
-including reasoning. The legacy protocol profile uses 256 / 1,024 tokens.
+including reasoning. The protocol profile uses 256 / 1,024 tokens.
 The smoke run is a separate 50-call run. Conversation creation is an additional
 API operation, not an inference call. SDK retries are disabled. Episode concurrency
 is 1–20, queue capacity is 3,000, and the comparison drain deadline defaults to
@@ -204,4 +204,4 @@ Judge retries count against the backend's configured budget (normally 3,000).
 Errors and truncated outputs remain visible in coverage and final checks.
 
 Failed source turns do not prevent later independent fixed-prefix cases. In the
-legacy profile they stop their own episode. No profile executes tools automatically.
+protocol profile they stop their own episode. No profile executes tools automatically.

@@ -63,7 +63,7 @@ async def run(
     run_id = None
     with BackendClient(connection) as backend:
         try:
-            state = backend.get("/stats?summary=1")
+            state = backend.get("/stats")
             judges = state.get("judging", {})
             if (
                 state.get("active_run_id")
@@ -213,7 +213,7 @@ async def run(
             drained = captures.flush(timeout=60)
             deadline, next_progress = time.monotonic() + wait_seconds, 0.0
             while not fixed:
-                state = backend.get("/stats?summary=1")
+                state = backend.get("/stats")
                 if not state["active"] and not state["queued"]:
                     break
                 if time.monotonic() > deadline:
@@ -303,7 +303,7 @@ async def run(
                 scores=scores,
                 quality=aggregate(scores),
                 correlation=correlation,
-                backend_counts={k: v for k, v in state.items() if k != "results"},
+                backend_counts=state,
                 capture_metrics={
                     "exported": captures.exported,
                     "export_dropped": captures.export_dropped,

@@ -19,10 +19,9 @@
     document.querySelector('#load-message').textContent=message;
     state.textContent=message;
   }
-  const headers=()=>({});
   async function loadRuns(){
-    const response=await fetch(scoped('/v1/runs'),{headers:headers(),credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(5000)});
-    if(!response.ok){const error=new Error(`Backend returned HTTP ${response.status}.`);error.unauthorized=response.status===401;throw error;}
+    const response=await fetch(scoped('/v1/runs'),{credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(5000)});
+    if(!response.ok)throw new Error(`Backend returned HTTP ${response.status}.`);
     return (await response.json()).runs;
   }
   function showRuns(items,selected){
@@ -49,7 +48,7 @@
       const currentRun=!runId || runId===s.active_run_id || (!s.active_run_id && runId===lastLiveRunId);
       queuePanel.hidden=false;queuePanel.dataset.live=String(currentRun);
       {
-        const jobs=snapshot.records.flatMap(row=>row.comparisons ?? (row.comparison?[row.comparison]:[]));
+        const jobs=snapshot.records.flatMap(row=>row.comparisons);
         const saved={received:snapshot.loaded,comparison_jobs:jobs.length,workers:selected?.workers||1,
           queued:jobs.filter(j=>j.status==='pending').length,active:jobs.filter(j=>j.status==='running').length,
           completed:jobs.filter(j=>j.status==='completed').length,failed:jobs.filter(j=>j.status==='error').length,
@@ -67,7 +66,7 @@
           ?`${s.paused?'Dispatch paused':'Dispatch enabled'} · queued jobs wait on the backend; OpenAI calls do not wait for them.`
           :'Persisted job states for this run; live activity from other runs is excluded.');
       }
-      const judged=snapshot.records.flatMap(row=>row.comparisons || []).map(j=>j.judgment).filter(Boolean);
+      const judged=snapshot.records.flatMap(row=>row.comparisons).map(j=>j.judgment).filter(Boolean);
       const judgeCounts=status=>judged.filter(j=>j.status===status).length;
       if(s.configuration_note)document.querySelector('#queue-note').textContent+=' '+s.configuration_note;
       document.querySelector('#queue-note').textContent+=` Judging: ${judgeCounts('pending')} queued · ${judgeCounts('running')} active · ${judgeCounts('completed')} decided · ${judgeCounts('uncertain')} uncertain · ${judgeCounts('error')} errors · ${judgeCounts('skipped')} skipped.`;
@@ -117,7 +116,7 @@
   form.addEventListener('submit',event=>{event.preventDefault();connectBackend();});
   picker.addEventListener('change',()=>connect(picker.value));
   projectPicker.addEventListener('change',()=>{projectId=projectPicker.value;connectBackend();});
-  disconnect.addEventListener('click',()=>{generation++;active=false;view.disconnect();view.setData([]);;form.classList.remove('session-connected');view.notice('Disconnected');view.el.querySelector('.pl-connection').textContent='Disconnected';showState('Dashboard disconnected','Saved runs remain on the backend. Reconnect to load them.');disconnect.disabled=true;});
+  disconnect.addEventListener('click',()=>{generation++;active=false;view.disconnect();view.setData([]);form.classList.remove('session-connected');view.notice('Disconnected');view.el.querySelector('.pl-connection').textContent='Disconnected';showState('Dashboard disconnected','Saved runs remain on the backend. Reconnect to load them.');disconnect.disabled=true;});
   window.addEventListener('pagehide',()=>{generation++;if(active)view.disconnect();view.destroy();},{once:true});
   connectBackend();
 })();

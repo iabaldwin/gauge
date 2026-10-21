@@ -12,7 +12,7 @@ from gauge.validation.backend import BackendClient
 async def preflight(backend: BackendClient) -> None:
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
-        state = await asyncio.to_thread(backend.get, "/stats?summary=1")
+        state = await asyncio.to_thread(backend.get, "/stats")
         if state["failed"]:
             raise RuntimeError("First comparison failed; remaining source budget not dispatched")
         judges = state.get("judging", {})
@@ -33,7 +33,7 @@ async def drain(backend: BackendClient, run_id: str, wait_seconds: int) -> tuple
 
     async def state() -> dict:
         nonlocal last_progress
-        result = await asyncio.to_thread(backend.get, "/stats?summary=1")
+        result = await asyncio.to_thread(backend.get, "/stats")
         if time.monotonic() > deadline:
             raise TimeoutError("Comparison/judge drain timed out")
         if time.monotonic() - last_progress >= 15:
