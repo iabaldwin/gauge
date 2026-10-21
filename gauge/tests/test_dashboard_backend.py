@@ -120,6 +120,109 @@ def test_old_capture_has_no_fabricated_comparison(backend_module, tmp_path):
     assert backend_module.DashboardStore(path).page()["records"][0]["comparisons"] == []
 
 
+def test_finished_output_survives_write_outage_without_repeating_inference(
+    backend_module, monkeypatch, tmp_path
+):
+    import sqlite3
+
+    recovered, failed = threading.Event(), threading.Event()
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            kwargs["http_client"].close()
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="household"), finish_reason="stop"
+                    )
+                ],
+                usage=None,
+            )
+
+    monkeypatch.setattr(backend_module, "OpenAI", FakeClient)
+    backend = backend_module.Backend(str(tmp_path / "outage.sqlite"), "candidate", 4, 4)
+    original_put = backend.dashboard.put
+
+    def put(row):
+        if row["status"] == "completed" and not recovered.is_set():
+            failed.set()
+            raise sqlite3.OperationalError("disk full")
+        original_put(row)
+
+    monkeypatch.setattr(backend.dashboard, "put", put)
+    try:
+        first = event(1)
+        backend.accept(json.dumps(first).encode(), first["call_id"])
+        assert failed.wait(3)
+        wait_for(lambda: bool(backend.dashboard.reporting.snapshot()))
+        saved = backend.dashboard.page()["records"][0]["comparisons"][0]
+        assert saved["status"] == "completed"
+        assert saved["candidate_output"] == "household"
+        assert saved["persistence"]["status"] == "retrying"
+        snapshot = backend.snapshot()
+        assert snapshot["completed"] == 1
+        assert snapshot["pending_result_writes"] == 1
+        assert "awaiting storage" in snapshot["configuration_note"]
+
+        second = event(2)
+        backend.accept(json.dumps(second).encode(), second["call_id"])
+        assert len(calls) == 1  # Worker retains its outcome before taking more paid work.
+        assert backend.jobs.qsize() == 1
+    finally:
+        recovered.set()
+    wait_for(lambda: backend.jobs.unfinished_tasks == 0)
+    assert len(calls) == 2
+    assert backend.snapshot()["pending_result_writes"] == 0
+    rows = backend_module.DashboardStore(backend.db, recover=False).page()["records"]
+    assert all(row["comparisons"][0]["status"] == "completed" for row in rows)
+    assert all("persistence" not in row["comparisons"][0] for row in rows)
+
+
+def test_finished_judgment_is_visible_and_recovers_while_backend_stays_up(
+    backend_module, monkeypatch, tmp_path
+):
+    import sqlite3
+
+    path = str(tmp_path / "judge-outage.sqlite")
+    inbox = CaptureInbox(path)
+    original = event(1)
+    inbox.accept(json.dumps(original).encode())
+    inbox.close()
+    store = backend_module.DashboardStore(path)
+    key = original["call_id"], "candidate"
+    store.put({"call_id": key[0], "candidate": key[1], "status": "completed"})
+    store.update_judgment(*key, {"status": "running"})
+    update = store.update_judgment
+    recovered = threading.Event()
+
+    def write(*args, **kwargs):
+        if not recovered.is_set():
+            raise sqlite3.OperationalError("database is locked")
+        return update(*args, **kwargs)
+
+    monkeypatch.setattr(store, "update_judgment", write)
+    judgment = {"status": "completed", "id": "judgment_original", "confidence": 0.99}
+    worker = threading.Thread(target=store.finish_judgment, args=(*key, judgment), daemon=True)
+    worker.start()
+    try:
+        wait_for(lambda: bool(store.reporting.snapshot()))
+        visible = store.page()["records"][0]["comparisons"][0]["judgment"]
+        assert visible["status"] == "completed"
+        assert visible["confidence"] == 0.99
+        assert visible["persistence"]["status"] == "retrying"
+    finally:
+        recovered.set()
+        worker.join(3)
+    assert not worker.is_alive()
+    persisted = backend_module.DashboardStore(path, recover=False).page()["records"]
+    assert persisted[0]["comparisons"][0]["judgment"] == judgment
+
+
 def test_run_pages_include_older_results_and_survive_restart(backend_module, tmp_path):
     path = str(tmp_path / "paged.sqlite")
     inbox = CaptureInbox(path)

@@ -106,9 +106,7 @@ class JudgeQueue:
                 judgment.update(status="error", error=type(exc).__name__)
             judgment["finished_at"] = time.time()
             try:
-                self.store.update_judgment(*key, judgment)
-            except Exception:
-                judgment["status"] = "error"
+                self.store.finish_judgment(*key, judgment)
             finally:
                 with self.lock:
                     self.inflight.discard(key)

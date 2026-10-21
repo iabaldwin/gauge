@@ -7,10 +7,13 @@ import sqlite3
 import time
 from typing import Any
 
+from gauge.backend.reporting import TerminalWrites
+
 
 class DashboardStore:
     def __init__(self, path: str, *, recover: bool = True) -> None:
         self.path = path
+        self.reporting = TerminalWrites()
         with sqlite3.connect(path, timeout=5) as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
@@ -114,6 +117,41 @@ class DashboardStore:
             db.execute(
                 "INSERT OR REPLACE INTO gauge_runs VALUES (?, ?)", (run["id"], json.dumps(run))
             )
+
+    def finish_comparison(self, row: dict[str, Any]) -> None:
+        self.reporting.finish(
+            ("comparison", row["call_id"], row["candidate"]), row, lambda: self.put(row)
+        )
+
+    def finish_judgment(self, call_id: str, candidate: str, judgment: dict) -> None:
+        def write() -> None:
+            if not self.update_judgment(call_id, candidate, judgment):
+                raise LookupError("Comparison is missing")
+
+        self.reporting.finish(("judgment", call_id, candidate), judgment, write)
+
+    def comparison_counts(self) -> dict[str, int]:
+        pending = self.reporting.snapshot()
+        with sqlite3.connect(self.path, timeout=5) as db:
+            counts = dict(
+                db.execute(
+                    "SELECT json_extract(payload, '$.status'), count(*) "
+                    "FROM gauge_comparisons GROUP BY 1"
+                )
+            )
+            for (kind, call_id, candidate), entry in pending.items():
+                if kind != "comparison":
+                    continue
+                prior = db.execute(
+                    "SELECT json_extract(payload, '$.status') FROM gauge_comparisons "
+                    "WHERE call_id=? AND candidate=?",
+                    (call_id, candidate),
+                ).fetchone()
+                if prior:
+                    counts[prior[0]] -= 1
+                status = entry["payload"]["status"]
+                counts[status] = counts.get(status, 0) + 1
+        return counts
 
     def update_judgment(
         self, call_id: str, candidate: str, judgment: dict, *, only_unjudged: bool = False
@@ -236,6 +274,15 @@ class DashboardStore:
                     [row[1] for row in page],
                 ):
                     jobs.setdefault(call_id, []).append(json.loads(payload))
+        for (kind, call_id, candidate), entry in self.reporting.snapshot().items():
+            for job in jobs.get(call_id, []):
+                if job["candidate"] != candidate:
+                    continue
+                if kind == "comparison":
+                    job.update(entry["payload"])
+                    job["persistence"] = entry["persistence"]
+                else:
+                    job["judgment"] = {**entry["payload"], "persistence": entry["persistence"]}
         return {
             "records": [
                 {"capture": json.loads(payload), "comparisons": jobs.get(call_id, [])}
