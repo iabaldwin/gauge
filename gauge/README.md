@@ -339,13 +339,11 @@ generation or the example's preflight. No reasoning settings are changed.
 
 ## Public-data validation
 
-See [the validation guide](docs/validation.md) for pinned BANKING77, MultiWOZ 2.2,
-and SQuAD 2.0 fixtures, four client protocols, independent gold scoring, and
-50-call smoke / 1,000-call full profiles. Validation lives in its own package;
-dataset preparation, replay, scoring, and orchestration are separate modules.
-
-Install with `python -m pip install './gauge[validation]'` and run
-`python -m gauge.validation --help`.
+See [the validation guide](docs/validation.md) for BANKING77, SQuAD 2.0, CoQA,
+QuAC, and a bounded English Multi-IF subset. Run `make evals-all EVAL_PROFILE=smoke`
+from the repository root, or a dataset target such as `make evals-coqa`.
+Native dataset quality and pairwise OpenAI agreement are reported separately.
+Install benchmark dependencies with `pip install './gauge[validation]'`.
 
 ## Development
 

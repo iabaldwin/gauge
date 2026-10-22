@@ -4,7 +4,7 @@ import sys
 import time
 from types import SimpleNamespace
 
-from gauge.backend import server
+from gauge.backend import agreement, server
 
 
 class FixtureProvider:
@@ -36,5 +36,33 @@ class FixtureProvider:
         )
 
 
+class FixtureJudge:
+    def grade_answers(self, context, references, output):
+        assert references == ["household cleaning supplies"] * 3
+        assert output == "household"
+        return {
+            "status": "completed",
+            "verdict": "equivalent",
+            "confidence": 0.99,
+            "reason": "none",
+            "rubric_version": "reference-answers-v1",
+        }
+
+    def grade_reference(self, context, reference, output):
+        return {
+            "status": "completed",
+            "verdict": "equivalent" if reference == output else "different",
+            "confidence": 0.99,
+            "reason": "none" if reference == output else "fact",
+        }
+
+
+class FixtureAgreement(agreement.AgreementEvaluator):
+    def __init__(self, store, **kwargs):
+        super().__init__(store, enabled=True)
+
+
+agreement.JevJudge = FixtureJudge
+server.AgreementEvaluator = FixtureAgreement
 server.OpenAI = FixtureProvider
 server.serve(0, sys.argv[1], "test/fireworks-candidate", 1, 8)

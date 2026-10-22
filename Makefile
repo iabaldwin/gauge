@@ -20,7 +20,9 @@ help:
 	  'make stress-large   Live saturation: 1000 OpenAI calls, 3 Fireworks candidates' \
 	  'make ab-small       A/B: 20 native + 20 Gauge calls' \
 	  'make ab-medium      A/B: 200 native + 200 Gauge calls' \
-	  'make ab-large       A/B: 1000 native + 1000 Gauge calls'
+	  'make ab-large       A/B: 1000 native + 1000 Gauge calls' \
+	  'make evals-all      Grounded quality suite: 750 source calls + 2250 comparisons' \
+	  'make evals-{banking,squad,coqa,quac,multiif}  One dataset (EVAL_PROFILE=smoke for preview)'
 
 stress-small: STRESS_CALLS = 20
 stress-small: STRESS_CONCURRENCY = 4
@@ -79,3 +81,28 @@ ab-small ab-medium ab-large:
 	  --calls-per-arm $(AB_CALLS) --concurrency $(AB_CONCURRENCY) \
 	  --batch-size $(AB_BATCH) --model "$(AB_MODEL)" \
 	  --output "$(STRESS_OUTPUT_DIR)/$@-$$(date +%Y%m%d-%H%M%S).json"
+
+EVAL_PROFILE ?= full
+EVAL_SOURCE_MODEL ?=
+EVAL_OUTPUT_DIR ?= out/evals
+EVAL_CONCURRENCY ?= 4
+.PHONY: evals-all evals-banking evals-squad evals-coqa evals-quac evals-multiif
+evals-all: EVAL_DATASET = all
+evals-banking: EVAL_DATASET = banking77
+evals-squad: EVAL_DATASET = squad2
+evals-coqa: EVAL_DATASET = coqa
+evals-quac: EVAL_DATASET = quac
+evals-multiif: EVAL_DATASET = multiif
+
+evals-all evals-banking evals-squad evals-coqa evals-quac evals-multiif:
+	@set -eu; \
+	base="$(EVAL_OUTPUT_DIR)/$(EVAL_DATASET)-$(EVAL_PROFILE)-$$(date +%Y%m%d-%H%M%S)"; \
+	$(UV) run --project gauge --extra validation python -m gauge.validation prepare \
+	  --profile "$(EVAL_PROFILE)" --dataset "$(EVAL_DATASET)" --output "$$base.manifest.json"; \
+	$(UV) run --project gauge --extra validation python -m gauge.validation check \
+	  "$$base.manifest.json" --output "$$base.offline.json"; \
+	$(UV) run --project gauge --extra validation gauge backend stop; \
+	$(UV) run --project gauge --extra validation gauge backend start; \
+	$(UV) run --project gauge --extra validation python -m gauge.validation run \
+	  "$$base.manifest.json" --output "$$base.json" --concurrency "$(EVAL_CONCURRENCY)" \
+	  $(if $(EVAL_SOURCE_MODEL),--source-model "$(EVAL_SOURCE_MODEL)")

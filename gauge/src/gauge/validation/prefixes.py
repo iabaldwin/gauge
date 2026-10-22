@@ -34,15 +34,35 @@ def verify_prefixes(records: list[dict], ledger: list[dict], scenarios: list[Sce
             continue
         scenario = by_scenario[entry["scenario_id"]]
         request = capture["request"]
+        if scenario.history_mode == "source":
+            prior = sorted(
+                (
+                    r
+                    for r in ledger
+                    if r["scenario_id"] == scenario.id and r["turn"] < entry["turn"]
+                ),
+                key=lambda r: r["turn"],
+            )
+            prefix = []
+            for item in prior:
+                prefix.extend(
+                    [
+                        {"role": "user", "content": scenario.turns[item["turn"]]["user"]},
+                        {"role": "assistant", "content": item.get("source_output")},
+                    ]
+                )
+            prefix.append({"role": "user", "content": scenario.turns[entry["turn"]]["user"]})
+        else:
+            prefix = recorded_prefix(scenario, entry["turn"])
         if scenario.protocol == "chat":
             expected = [
                 {"role": "system", "content": scenario.instructions},
-                *recorded_prefix(scenario, entry["turn"]),
+                *prefix,
             ]
             matches = request.get("messages") == expected
         else:
             matches = (
-                request.get("input") == recorded_prefix(scenario, entry["turn"])
+                request.get("input") == prefix
                 and request.get("instructions") == scenario.instructions
             )
         if matches and not (request.get("previous_response_id") or request.get("conversation")):

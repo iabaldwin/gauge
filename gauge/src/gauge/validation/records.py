@@ -16,9 +16,10 @@ class Scenario:
     task: str
     protocol: str
     instructions: str
-    turns: list[dict[str, str]]
+    turns: list[dict[str, Any]]
     expected: Any = None
     provenance: dict[str, Any] = field(default_factory=dict)
+    history_mode: str = "recorded"
 
 
 def digest(value: Any) -> str:

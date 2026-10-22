@@ -54,7 +54,14 @@ class RunMaintenance:
         ).fetchone()[0]
         if dependencies:
             raise MaintenanceConflict("Other saved captures depend on this run's context")
-        digest = hashlib.sha256(json.dumps([selected, captures, comparisons]).encode()).hexdigest()
+        agreement = db.execute(
+            f"SELECT payload FROM gauge_agreement WHERE run_id IN ({marks}) "
+            "ORDER BY run_id, conversation, turn",
+            ids,
+        ).fetchall()
+        digest = hashlib.sha256(
+            json.dumps([selected, captures, comparisons, agreement]).encode()
+        ).hexdigest()
         return {
             "run_ids": ids,
             "runs": [{"id": i, "name": json.loads(p).get("name", i)} for i, p in selected],
@@ -90,6 +97,7 @@ class RunMaintenance:
                     f"(SELECT call_id FROM gauge_run_captures WHERE run_id IN ({marks}))",
                     run_ids,
                 )
+            db.execute(f"DELETE FROM gauge_agreement WHERE run_id IN ({marks})", run_ids)
             db.execute(f"DELETE FROM gauge_run_captures WHERE run_id IN ({marks})", run_ids)
             db.execute(f"DELETE FROM gauge_runs WHERE id IN ({marks})", run_ids)
         return {**plan, "backup": str(backup), "cleared": True}

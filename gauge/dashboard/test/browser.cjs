@@ -100,6 +100,18 @@ const {pathToFileURL}=require('node:url');
     await expect(page.locator('#queue-active')).toHaveText('1');
     await expect(page.locator('#queue-dropped')).toHaveText('1');
     await expect(page.locator('#queue-note')).toContainText('Dispatch paused');
+    // Global saved-run totals must not inflate an active selected-run queue.
+    await page.goto(url+'/dashboard?run='+run.id);
+    await expect(page.locator('#run')).toHaveValue(run.id);
+    let interceptedStats=false;
+    await page.route('**/v1/dashboard**',async route=>{
+      const response=await route.fetch(),state=await response.json();interceptedStats=true;
+      await route.fulfill({response,json:{...state,stats:{...state.stats,completed:9000,failed:9000}}});
+    });
+    await expect.poll(()=>interceptedStats).toBe(true);
+    await expect(page.locator('#queue-note')).toContainText('5 captured requests');
+    await expect(page.locator('#queue-completed')).not.toHaveText('9,000');
+    await page.unroute('**/v1/dashboard**');
     expect((await api.post('/v1/runs/end',{data:{run_id:run.id,report:{performance,checks:{passed:true},baseline:{calls:0},during_saturation:{calls:5}}}})).status()).toBe(200);
     await expect.poll(async()=> (await (await api.get('/stats')).json()).active).toBe(0);
     await page.goto(url+'/dashboard');
@@ -121,6 +133,41 @@ const {pathToFileURL}=require('node:url');
     await ab.getByLabel('Performance latency population').selectOption('success');
     await expect(ab.locator('.pl-hist-heading')).toContainText('4 measurements');
 
+    for(const [turn,id,reference] of [[0,1,'household'],[1,3,'food']]){
+      const registered=await api.post('/v1/agreement/cases',{data:{run_id:run.id,conversation:'multiwoz22/fixture/chat',dataset:'multiwoz22',turn,reference,call_id:capture(id).call_id}});
+      expect(registered.status()).toBe(200);
+    }
+    expect((await api.post('/v1/agreement/judge',{data:{run_id:run.id}})).status()).toBe(202);
+    await expect.poll(async()=> (await (await api.get('/v1/agreement?run_id='+run.id)).json()).statuses.completed).toBe(4);
+    const tree=page.locator('#agreement-tree');
+    await expect(tree).toBeVisible({timeout:10000});
+    await expect(tree.locator('.agreement-turn')).toHaveCount(2);
+    await expect(tree).toContainText('First divergence · turn 2');
+    await tree.getByLabel('Agreement model',{exact:true}).selectOption('test/fireworks-candidate');
+    await expect(tree.locator('.agreement-branch')).toHaveCount(2);
+    await tree.locator('.agreement-branch summary').last().click();
+    await expect(tree.locator('.agreement-branch').last()).toContainText('Decision: fact');
+    await tree.locator('.agreement-context summary').first().click();
+    await expect(tree.locator('.agreement-context').first()).toContainText('Dish soap');
+    const qa=await api.post('/v1/agreement/cases',{data:{run_id:run.id,conversation:'coqa/fixture',dataset:'coqa',turn:0,reference:'household cleaning supplies',call_id:first.call_id,assessment:{task:'coqa',expected:{answers:Array(3).fill('household cleaning supplies')}}}});
+    expect(qa.status()).toBe(200);
+    expect((await api.post('/v1/agreement/judge',{data:{run_id:run.id}})).status()).toBe(202);
+    await expect.poll(async()=> (await (await api.get('/v1/agreement?run_id='+run.id)).json()).statuses.completed).toBe(6);
+    await expect(tree.getByLabel('Agreement conversation').locator('option[value="coqa/fixture"]')).toHaveCount(1);
+    await tree.getByLabel('Agreement conversation').selectOption('coqa/fixture');
+    await tree.getByLabel('Agreement model',{exact:true}).selectOption('');
+    await expect(tree.locator('.agreement-badge')).toHaveText(['Agrees','Agrees']);
+    await expect(tree.locator('.agreement-detail')).not.toContainText('FIRST CONFIRMED DIVERGENCE');
+    await tree.getByText('Human reference answers',{exact:true}).click();
+    await expect(tree).toContainText('household cleaning supplies ×3');
+    await tree.locator('.agreement-branch summary').first().click();
+    await tree.getByText('Benchmark metrics · separate from agreement',{exact:true}).first().click();
+    await expect(tree.locator('.agreement-branch').first()).toContainText('50.0%');
+    await expect(tree).not.toContainText('Criterion failed');
+
+    await page.setViewportSize({width:390,height:844});
+    expect(await tree.evaluate(el=>el.scrollWidth<=el.clientWidth+2)).toBe(true);
+    await page.setViewportSize({width:1600,height:1000});
     await expect(page.locator('#queue-completed')).toHaveText('3');
     await expect(page.locator('#queue-failed')).toHaveText('1');
     await page.reload();
@@ -166,9 +213,11 @@ const {pathToFileURL}=require('node:url');
     // Run cleanup is previewed and backed up; this database is a disposable fixture.
     expect((await page.request.post(`http://127.0.0.1:${newPort}/v1/runs/clear/preview`,{data:{run_ids:[run.id]}})).status()).toBe(200);
     const preview=(await (await api.post('/v1/runs/clear/preview',{data:{run_ids:[run.id]}})).json());
+    expect((await (await api.get('/v1/agreement?run_id='+run.id)).json()).statuses.completed).toBe(6);
     expect(preview.captures).toBe(5);expect(preview.comparisons).toBe(5);
     const cleared=await api.post('/v1/runs/clear',{data:{run_ids:preview.run_ids,fingerprint:preview.fingerprint}});
     expect(cleared.status()).toBe(200);expect((await cleared.json()).backup).toContain('gauge-before-clear');
+    expect((await (await api.get('/v1/agreement?run_id='+run.id)).json()).conversations).toHaveLength(0);
     expect((await (await api.get('/v1/runs')).json()).runs).toHaveLength(0);
     expect((await (await api.get('/v1/dashboard')).json()).total).toBe(0);
     expect(errors).toEqual([]);

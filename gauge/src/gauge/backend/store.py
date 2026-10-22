@@ -33,6 +33,9 @@ class DashboardStore:
                 "CREATE INDEX IF NOT EXISTS comparison_configuration "
                 "ON gauge_comparisons(json_extract(payload, '$.configuration_id'))"
             )
+            db.execute("""CREATE TABLE IF NOT EXISTS gauge_agreement (
+                run_id TEXT NOT NULL, conversation TEXT NOT NULL, turn INTEGER NOT NULL,
+                payload TEXT NOT NULL, PRIMARY KEY (run_id, conversation, turn))""")
             db.execute("PRAGMA busy_timeout=5000")
             if not recover:
                 return

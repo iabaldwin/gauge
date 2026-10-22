@@ -11,15 +11,15 @@ from pathlib import Path
 import httpx
 
 from gauge import captures
+from gauge.evaluation.scoring import aggregate, expected_for, grade
 from gauge.openai import AsyncOpenAI
 from gauge.validation.backend import BackendClient, source_options
 from gauge.validation.checks import evaluate
+from gauge.validation.dispatch import Dispatcher
 from gauge.validation.drain import drain, preflight
-from gauge.validation.prefixes import recorded_prefix, verify_prefixes
-from gauge.validation.protocols import exchange, outcome
+from gauge.validation.prefixes import verify_prefixes
 from gauge.validation.records import read_suite
 from gauge.validation.report import render
-from gauge.validation.scoring import aggregate, grade
 
 DEFAULT_MODELS = [
     "accounts/fireworks/models/qwen3p8-max",
@@ -39,13 +39,15 @@ async def run(
     if not 1 <= concurrency <= 20 or not 1 <= wait_seconds <= 3600:
         raise ValueError("Concurrency 1–20 and wait 1–3600 seconds required")
     manifest, scenarios = read_suite(manifest_path)
-    fixed = manifest.get("dispatch_mode") == "fixed-prefix"
-    if fixed and any(s.protocol not in {"chat", "responses"} for s in scenarios):
-        raise ValueError("Fixed-prefix cases require self-contained chat or Responses input")
+    if manifest.get("dispatch_mode") != "quality-suite":
+        raise ValueError("Run requires a quality-suite manifest; prepare a new suite")
+    if any(s.protocol not in {"chat", "responses"} for s in scenarios):
+        raise ValueError("Quality cases require self-contained chat or Responses input")
     if not 1 <= manifest["source_calls"] <= 1000:
         raise ValueError("Source call budget must be 1–1000")
     options = source_options()
-    ledger, source_rows = [], []
+    ledger: list[dict] = []
+    source_rows: list[dict] = []
     started = time.monotonic()
     report = {
         "schema_version": 1,
@@ -56,8 +58,8 @@ async def run(
         "source_calls": manifest["source_calls"],
         "sources": manifest["sources"],
         "candidate_models": DEFAULT_MODELS,
-        "candidate_max_output_tokens": 2048 if fixed else 1024,
-        "source_max_output_tokens": 1024 if fixed else 256,
+        "candidate_max_output_tokens": 2048,
+        "source_max_output_tokens": 1024,
         "checks": {},
     }
     run_id = None
@@ -65,22 +67,33 @@ async def run(
         try:
             state = backend.get("/stats")
             judges = state.get("judging", {})
+            references = state["reference_judging"]
             if (
                 state.get("active_run_id")
                 or state["active"]
                 or state["queued"]
                 or judges.get("active")
                 or judges.get("queued")
+                or references["pending"]
             ):
                 raise ValueError("Backend must be idle before validation")
-            if fixed and (not judges.get("enabled") or judges.get("calls_started", 0)):
-                raise ValueError("Fixed-prefix validation needs a fresh enabled judge budget")
+            if not judges.get("enabled") or judges.get("calls_started", 0):
+                raise ValueError("Quality validation needs a fresh enabled judge budget")
+            reference_budget = (
+                sum(len(s.turns) for s in scenarios if s.task in {"coqa", "quac"}) * 4
+            )
+            if reference_budget and (
+                not references["enabled"]
+                or references["budget"] - references["calls_finished"] < reference_budget
+            ):
+                raise ValueError(
+                    "Insufficient enabled JEV reference budget; restart the idle backend"
+                )
             result = backend.post(
                 "/v1/runs/start",
                 {
                     "name": (
-                        f"{'Fixed prefixes' if fixed else 'Public data'} · "
-                        f"{manifest['profile']} · {manifest['source_calls']} calls"
+                        f"Quality suite · {manifest['profile']} · {manifest['source_calls']} calls"
                     ),
                     "models": DEFAULT_MODELS,
                     "capacity": 3000,
@@ -103,91 +116,14 @@ async def run(
                 timeout=30,
                 http_client=httpx.AsyncClient(proxy=os.environ.get("HTTPS_PROXY"), trust_env=False),
             ) as client:
+                dispatcher = Dispatcher(
+                    client, model, report["source_max_output_tokens"], ledger, source_rows
+                )
 
-                async def episode(scenario):
+                async def episode(scenario, start=0):
                     async with semaphore:
-                        history, previous, conversation = [], None, None
-                        if scenario.protocol == "conversation":
-                            try:
-                                conversation = (await client.conversations.create()).id
-                            except Exception as exc:
-                                report.setdefault("control_errors", []).append(
-                                    {
-                                        "scenario_id": scenario.id,
-                                        "error": type(exc).__name__,
-                                        "http_status": getattr(exc, "status_code", None),
-                                    }
-                                )
-                                return
-                        for i, turn in enumerate(scenario.turns):
-                            if fixed:
-                                history = recorded_prefix(scenario, i)[:-1]
-                            before = time.monotonic()
-                            entry = {
-                                "scenario_id": scenario.id,
-                                "dataset": scenario.dataset,
-                                "task": scenario.task,
-                                "protocol": scenario.protocol,
-                                "turn": i,
-                                "recorded_reference": turn.get("assistant") if fixed else None,
-                                "parent_response_id": previous
-                                if scenario.protocol == "chain"
-                                else None,
-                            }
-                            try:
-                                response = await exchange(
-                                    client,
-                                    scenario,
-                                    i,
-                                    history,
-                                    previous,
-                                    conversation,
-                                    model,
-                                    report["source_max_output_tokens"],
-                                )
-                                raw, text, complete = outcome(response)
-                                entry.update(
-                                    response_id=response.id,
-                                    request_id=response._request_id,
-                                    complete=complete,
-                                )
-                                source_rows.append(
-                                    {
-                                        **entry,
-                                        "target": model,
-                                        "score": grade(
-                                            scenario.task, scenario.expected, text, complete
-                                        ),
-                                    }
-                                )
-                                if not fixed:
-                                    history += [
-                                        {"role": "user", "content": turn["user"]},
-                                        {"role": "assistant", "content": text or ""},
-                                    ]
-                                    previous = response.id
-                            except Exception as exc:
-                                entry.update(
-                                    response_id=None,
-                                    complete=False,
-                                    error=type(exc).__name__,
-                                    http_status=getattr(exc, "status_code", None),
-                                )
-                                source_rows.append(
-                                    {
-                                        **entry,
-                                        "target": model,
-                                        "score": grade(
-                                            scenario.task, scenario.expected, None, False
-                                        ),
-                                    }
-                                )
-                                ledger.append(entry)
-                                if fixed:
-                                    continue  # Independent cases retain recorded context.
-                                break  # Never pretend a failed stateful turn has usable context.
-                            entry["latency_ms"] = round((time.monotonic() - before) * 1000, 2)
-                            ledger.append(entry)
+                        for index in range(start, len(scenario.turns)):
+                            await dispatcher.turn(scenario, index)
                             if len(ledger) % 25 == 0:
                                 print(
                                     json.dumps(
@@ -199,38 +135,17 @@ async def run(
                                     flush=True,
                                 )
 
-                # One independent request checks source access within the fixture budget.
-                await episode(scenarios[0])
-                if not ledger or not ledger[-1].get("complete"):
+                # Check exactly one turn before spending the rest of the fixture budget.
+                if not await dispatcher.turn(scenarios[0], 0):
                     raise RuntimeError(
                         "First source call failed; remaining budget was not dispatched"
                     )
-                if fixed:
-                    if not captures.flush(timeout=15):
-                        raise RuntimeError("First capture was not exported")
-                    await preflight(backend)
-                await asyncio.gather(*(episode(s) for s in scenarios[1:]))
+                if not captures.flush(timeout=15) or captures.exported != 1:
+                    raise RuntimeError("First capture was not exported")
+                await preflight(backend, run_id)
+                await asyncio.gather(episode(scenarios[0], 1), *(episode(s) for s in scenarios[1:]))
             drained = captures.flush(timeout=60)
-            deadline, next_progress = time.monotonic() + wait_seconds, 0.0
-            while not fixed:
-                state = backend.get("/stats")
-                if not state["active"] and not state["queued"]:
-                    break
-                if time.monotonic() > deadline:
-                    raise TimeoutError("Comparison drain timed out")
-                if time.monotonic() > next_progress:
-                    print(
-                        json.dumps(
-                            {k: state[k] for k in ("completed", "failed", "queued", "active")}
-                        ),
-                        flush=True,
-                    )
-                    next_progress = time.monotonic() + 15
-                await asyncio.sleep(0.5)
-            if fixed:
-                state, records = await drain(backend, run_id, wait_seconds)
-            else:
-                records = backend.records(run_id)
+            state, records = await drain(backend, run_id, wait_seconds)
             events = [r["capture"] for r in records]
             correlation = evaluate(events, ledger)
             by_response = {r["response_id"]: r for r in ledger if r.get("response_id")}
@@ -250,7 +165,7 @@ async def run(
                             "turn": truth["turn"],
                             "score": grade(
                                 scenario.task,
-                                scenario.expected,
+                                expected_for(scenario, truth["turn"]),
                                 job.get("candidate_output"),
                                 job["status"] == "completed" and job.get("finish_reason") == "stop",
                             ),
@@ -272,30 +187,28 @@ async def run(
                 "no_queue_drops": state["queue_dropped"] == 0,
                 "backend_drained": not state["queued"] and not state["active"],
             }
-            if fixed:
-                prefix_checks = verify_prefixes(records, ledger, scenarios)
-                report["prefix_checks"] = prefix_checks
-                checks["recorded_prefixes_correct"] = prefix_checks["passed"]
-                eligible = [
-                    j
-                    for r in records
-                    for j in r["comparisons"]
-                    if j["status"] == "completed" and j.get("finish_reason") == "stop"
-                ]
-                checks["all_eligible_pairs_judged"] = bool(eligible) and all(
-                    j.get("judgment", {}).get("status") in {"completed", "uncertain"}
-                    for j in eligible
-                )
-                checks["judge_drained"] = (
-                    not state["judging"]["active"] and not state["judging"]["queued"]
-                )
-                report["judgment_counts"] = {
-                    "eligible": len(eligible),
-                    **{
-                        status: sum(j.get("judgment", {}).get("status") == status for j in eligible)
-                        for status in ("completed", "uncertain", "error", "skipped")
-                    },
-                }
+            prefix_checks = verify_prefixes(records, ledger, scenarios)
+            report["prefix_checks"] = prefix_checks
+            checks["request_prefixes_correct"] = prefix_checks["passed"]
+            eligible = [
+                j
+                for r in records
+                for j in r["comparisons"]
+                if j["status"] == "completed" and j.get("finish_reason") == "stop"
+            ]
+            checks["all_eligible_pairs_judged"] = bool(eligible) and all(
+                j.get("judgment", {}).get("status") in {"completed", "uncertain"} for j in eligible
+            )
+            checks["judge_drained"] = (
+                not state["judging"]["active"] and not state["judging"]["queued"]
+            )
+            report["judgment_counts"] = {
+                "eligible": len(eligible),
+                **{
+                    status: sum(j.get("judgment", {}).get("status") == status for j in eligible)
+                    for status in ("completed", "uncertain", "error", "skipped")
+                },
+            }
             report.update(
                 checks=checks,
                 records=records,
@@ -309,6 +222,21 @@ async def run(
                     "export_dropped": captures.export_dropped,
                 },
                 wall_seconds=round(time.monotonic() - started, 2),
+            )
+            from gauge.validation.agreement import evaluate as evaluate_agreement
+
+            report["agreement"] = await evaluate_agreement(
+                backend, report, judge=True, wait_seconds=wait_seconds
+            )
+            checks["reference_judgments_complete"] = not any(
+                report["agreement"]["statuses"].get(status, 0)
+                for status in ("unjudged", "pending", "error", "skipped")
+            )
+            checks["native_checkers_succeeded"] = not any(
+                output.get("score", {}).get("reason", "").startswith("checker_error:")
+                for conversation in report["agreement"]["conversations"]
+                for turn in conversation["turns"]
+                for output in turn["outputs"].values()
             )
         except Exception as exc:
             report["test_error"] = type(exc).__name__ + ": " + str(exc)[:300]

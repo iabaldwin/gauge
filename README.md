@@ -152,3 +152,12 @@ node gauge/dashboard/test/browser.cjs
 
 The verification suite uses fixtures, not live inference. Local project state,
 credentials, model outputs, databases, and dependency directories stay outside Git.
+
+### Conversation agreement
+
+CoQA and QuAC use JEV reference judgments to show the first semantic departure;
+Multi-IF uses explicit instruction checks. The conversation tree includes full
+request context, per-model branches, and separate benchmark metrics. Missing
+outputs and uncertain judgments stay explicit.
+See [conversation agreement trees](gauge/docs/validation.md#dashboard-and-persistence)
+for saved-run judging and the separate backend JEV budget.
