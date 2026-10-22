@@ -35,6 +35,15 @@ const {pathToFileURL}=require('node:url');
     await page.reload();
     await expect(page.locator('.pl-connection')).toContainText('Connected');
     const run=(await (await api.post('/v1/runs/start',{data:{name:'Saved fixture run',models:['test/fireworks-candidate'],capacity:1,max_calls:8}})).json()).run;
+    const performance={
+      arms:Object.fromEntries(['native','gauge'].map(arm=>[arm,{calls:3,planned:3,successful:2,errors:1,incomplete:0,
+        latencies_ms:[100,200],attempt_latencies_ms:[100,200,30000],p50_ms:150,p95_ms:195,p99_ms:199,throughput:2}])),
+      delta:Object.fromEntries(['p50_ms','p95_ms','p99_ms','throughput'].map(k=>[k,{absolute:0,percent:0}])),
+      matched_pairs:2,paired_mean_delta_ms:0,
+      methodology:{model:'fixture',concurrency:2,batch_size:3,seed:42,calls_per_arm:3,description:'Fixture measurement method.'}
+    };
+    expect((await api.post('/v1/runs/progress',{data:{run_id:run.id,report:{performance}}})).status()).toBe(200);
+    expect((await (await api.get('/v1/runs')).json()).runs[0].status).toBe('running');
     const first=capture(1);
     first.request.messages=[{role:'system',content:'Use the supplied catalogue.'},{role:'developer',content:'Return a category.'},{role:'user',content:'Look up dish soap.'},{role:'assistant',content:'Household cleaning supplies'},...first.request.messages];
     expect((await api.post('/v1/captures',{data:first,headers:{'Idempotency-Key':first.call_id}})).status()).toBe(202);
@@ -91,12 +100,27 @@ const {pathToFileURL}=require('node:url');
     await expect(page.locator('#queue-active')).toHaveText('1');
     await expect(page.locator('#queue-dropped')).toHaveText('1');
     await expect(page.locator('#queue-note')).toContainText('Dispatch paused');
-    expect((await api.post('/v1/runs/end',{data:{run_id:run.id,report:{checks:{passed:true},baseline:{calls:0},during_saturation:{calls:5}}}})).status()).toBe(200);
+    expect((await api.post('/v1/runs/end',{data:{run_id:run.id,report:{performance,checks:{passed:true},baseline:{calls:0},during_saturation:{calls:5}}}})).status()).toBe(200);
     await expect.poll(async()=> (await (await api.get('/stats')).json()).active).toBe(0);
     await page.goto(url+'/dashboard');
     await expect(page.locator('#server-state')).toContainText('5/5 saved captures',{timeout:15000});
     await expect(page.locator('#run')).toHaveValue(run.id);
     await expect(page.locator('#queue-title')).toHaveText('SAVED COMPARISON JOBS');
+    const ab=page.locator('#performance-summary');
+    await expect(ab).toBeVisible();
+    await expect(ab.getByRole('table')).toContainText('A · Native OpenAI');
+    await expect(ab.locator('.pl-hist-overlay')).toBeVisible();
+    const coordinates=await ab.locator('.pl-hist-bar').evaluateAll(bars=>bars.map(b=>b.getAttribute('x')));
+    expect(new Set(coordinates).size).toBeLessThan(coordinates.length);
+    await ab.getByLabel('Performance latency population').selectOption('all');
+    await expect(ab.locator('.pl-hist-heading')).toContainText('6 measurements');
+    await ab.getByRole('button',{name:/A · Native OpenAI/}).click();
+    await expect(ab.locator('.pl-hist-heading')).toContainText('3 measurements');
+    await ab.getByRole('button',{name:/A · Native OpenAI/}).click();
+    await ab.getByLabel('Performance histogram bins').selectOption('12');
+    await ab.getByLabel('Performance latency population').selectOption('success');
+    await expect(ab.locator('.pl-hist-heading')).toContainText('4 measurements');
+
     await expect(page.locator('#queue-completed')).toHaveText('3');
     await expect(page.locator('#queue-failed')).toHaveText('1');
     await page.reload();
@@ -121,6 +145,7 @@ const {pathToFileURL}=require('node:url');
     await page.goto(`http://127.0.0.1:${newPort}/dashboard`);
     await expect(page.locator('#server-state')).toContainText('5/5 saved captures',{timeout:15000});
     await expect(page.locator('#run')).toHaveValue(run.id);
+    await expect(page.locator('#performance-summary')).toContainText('Same calls. Two clients.');
     // Offline HTML uses the same library and must work without a backend.
     const reportPath=path.join(temp,'offline.html');
     const rendered=spawnSync(path.join(root,'gauge/.venv/bin/python'),['-m','gauge','demo','--output',reportPath],{encoding:'utf8'});

@@ -5,7 +5,7 @@
   const state = document.querySelector('#demo-sample-state');
   let seed = 42;
   const charts = {
-    latency: new PixelLab.Histogram('#demo-latency', {title:'Inference latency', unit:'ms'}),
+    latency: new PixelLab.Histogram('#demo-latency', {title:'Inference latency · overlaid distributions', unit:'ms', layout:'overlay'}),
     reasoning: new PixelLab.Histogram('#demo-reasoning', {title:'Reasoning tokens', unit:'tokens'}),
     coverage: new PixelLab.Histogram('#demo-coverage', {title:'Reported output tokens', unit:'tokens'}),
     tail: new PixelLab.Histogram('#demo-tail', {title:'Latency with a long tail', unit:'ms'}),

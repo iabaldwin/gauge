@@ -44,6 +44,10 @@ ASSETS = {
         asset("validation-summary.js"),
         "text/javascript; charset=utf-8",
     ),
+    "/dashboard/performance-summary.js": (
+        asset("performance-summary.js"),
+        "text/javascript; charset=utf-8",
+    ),
     "/pixel-lab/pixel-lab.js": (asset("pixel-lab.js"), "text/javascript; charset=utf-8"),
     "/pixel-lab/pixel-lab.css": (asset("pixel-lab.css"), "text/css"),
 }
@@ -264,7 +268,7 @@ class Backend:
             self.gate.set()
             return run
 
-    def end_run(self, payload: dict[str, Any]) -> None:
+    def update_run(self, payload: dict[str, Any], *, finished: bool) -> None:
         with self.lock:
             if not self.active_run or payload["run_id"] != self.active_run["id"]:
                 raise CaptureConflict("Run is not active")
@@ -272,18 +276,23 @@ class Backend:
             if not isinstance(report, dict):
                 raise ValueError("Invalid report")
             run = dict(self.active_run)
-            run.update(
-                status="completed"
-                if report.get("checks")
-                and all(report["checks"].values())
-                and not report.get("test_error")
-                else "failed",
-                finished_at=time.time(),
-                summary=DashboardStore.report_summary(report),
-            )
+            run["summary"] = DashboardStore.report_summary(report)
+            if finished:
+                run.update(
+                    status="completed"
+                    if report.get("checks")
+                    and all(report["checks"].values())
+                    and not report.get("test_error")
+                    else "failed",
+                    finished_at=time.time(),
+                )
             self.dashboard.save_run(run)
-            self.active_run = None
-            self.gate.set()
+            self.active_run = None if finished else run
+            if finished:
+                self.gate.set()
+
+    def end_run(self, payload: dict[str, Any]) -> None:
+        self.update_run(payload, finished=True)
 
     def maintain_runs(self, config: dict[str, Any], *, clear: bool) -> dict:
         ids = config.get("run_ids")
@@ -518,6 +527,9 @@ def serve(
                 elif path == "/v1/runs/end":
                     backend.end_run(json.loads(raw))
                     self.reply(200, {"saved": True})
+                elif path == "/v1/runs/progress":
+                    backend.update_run(config, finished=False)
+                    self.reply(200, {"saved": True})
                 elif path in {"/v1/runs/clear/preview", "/v1/runs/clear"}:
                     self.reply(
                         200,
@@ -578,8 +590,12 @@ def serve(
             except Exception:
                 self.reply(503, {"error": "ingestion unavailable"})
 
-    server = ThreadingHTTPServer((host, port), Handler)
-    server.daemon_threads = True
+    class DashboardHTTPServer(ThreadingHTTPServer):
+        # Page assets, polling, and capture delivery can connect in the same burst.
+        request_queue_size = 64
+        daemon_threads = True
+
+    server = DashboardHTTPServer((host, port), Handler)
     print(json.dumps({"ready": True, "port": server.server_port}), flush=True)
     try:
         server.serve_forever()

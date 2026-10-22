@@ -34,3 +34,21 @@ body{margin:12px;background:#dce3ef}
 .validation-body td,.validation-body th{padding:12px;text-align:left;border-bottom:1px solid #dce3ef}.validation-body th{background:#f2f5fa}
 
 .connection #project{width:220px;font-size:11px}
+
+.performance-summary{margin:16px;padding:24px;border:2px solid #142449;background:#fff;box-shadow:4px 4px 0 #b6c3d9;flex:none;min-width:0}
+.performance-summary h2{font-size:24px;margin:8px 0 12px;letter-spacing:-1px}
+.performance-summary p{font-size:11px;line-height:1.7;color:#667390}
+.performance-controls{display:flex;gap:16px;flex-wrap:wrap;margin:18px 0}
+.performance-controls label{font-size:11px;display:flex;align-items:center;gap:8px}
+.performance-controls select{font:inherit;padding:6px;border:1px solid #b6c3d9;background:white}
+.performance-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:24px;align-items:start}
+.performance-grid .pl-hist-svg{max-height:320px}
+.performance-table-scroll{overflow-x:auto;margin:0}
+.performance-summary table{border-collapse:collapse;width:100%;font-size:11px;table-layout:fixed}
+.performance-summary td,.performance-summary th{padding:10px 8px;white-space:pre-line;text-align:right;border-bottom:1px solid #dce3ef;font-variant-numeric:tabular-nums}
+.performance-summary td:first-child,.performance-summary th:first-child{text-align:left}
+.performance-summary th{background:#edf1fa;color:#142449}
+.performance-summary details{font-size:11px;margin-top:12px}
+@media(max-width:600px){.performance-summary{margin:8px;padding:12px}.performance-summary h2{font-size:20px}.performance-summary td,.performance-summary th{padding:8px}}
+
+@media(max-width:1100px){.performance-grid{grid-template-columns:minmax(0,1fr)}}

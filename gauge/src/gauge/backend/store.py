@@ -86,6 +86,7 @@ class DashboardStore:
             "mode": report.get("mode"),
             "limits": report.get("limits"),
             "validation": report.get("validation"),
+            "performance": report.get("performance"),
         }
 
     def put(self, row: dict[str, Any]) -> None:

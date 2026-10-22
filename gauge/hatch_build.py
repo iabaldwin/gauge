@@ -21,5 +21,6 @@ class CustomBuildHook(BuildHookInterface):
             "gauge-adapter.js",
             "dashboard.css",
             "validation-summary.js",
+            "performance-summary.js",
         ):
             build_data["force_include"][str(root / "dashboard" / name)] = "gauge/_assets/" + name

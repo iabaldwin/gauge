@@ -92,6 +92,33 @@ candidate list with `STRESS_MODELS="MODEL_ID ..."`, or the report directory with
 `STRESS_OUTPUT_DIR=PATH`. The runner defaults to `gpt-4.1-nano` with an OpenAI key
 or `@openai-foundations/gpt-5.4-mini` through Portkey.
 
+## Native versus Gauge performance
+
+```sh
+make ab-small   # 20 native + 20 Gauge calls
+make ab-medium  # 200 native + 200 Gauge calls
+make ab-large   # 1,000 native + 1,000 Gauge calls, concurrency 20
+```
+
+Requires `OPENAI_API_KEY` and a backend started with `FIREWORKS_API_KEY`.
+Uses `gpt-4.1-nano` by default; override with `AB_MODEL=MODEL_ID`.
+Each arm runs in a separate persistent process with identical prompts and options.
+Matched batches run in seeded randomized A/B order. There are no extra warmups or
+provider retries; cold calls and failures stay in the saved measurements.
+
+The Gauge arm dispatches three Fireworks comparisons per capture, with capacity
+for all 3,000 jobs on the large run. Workers stay enabled. This measures caller
+performance under comparison load; it does not deliberately drop backend work.
+Wait for other runs and queues to finish first. After updating backend code, stop
+and start the idle backend to load it before running this target.
+
+The printed dashboard link shows live overlaid histograms, p50/p95/p99, active-batch
+throughput, errors, and Gauge-minus-native differences. Raw samples and batch order
+are saved in `out/stress/ab-*.json`; the histogram data also persists with the backend
+run. Errors and incomplete outputs are excluded from successful-latency percentiles
+and counted separately; the histogram can show all attempts. Live provider noise
+means these are observed differences, not proof of zero overhead.
+
 ## Build a distribution
 
 ```sh

@@ -1394,3 +1394,5 @@
     break-inside:avoid
   }
 }
+
+.pl-hist-overlay .pl-hist-bar{fill-opacity:.5;stroke:currentColor;stroke-width:.7}
