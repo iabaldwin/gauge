@@ -8,12 +8,16 @@
   let runs=[],active=false,generation=0,lastLiveRunId=null;
   const queuePanel=document.querySelector('#queue-status');
   const validationView=new GaugeValidationSummary(document.querySelector('#validation-summary'));
+  const agreementView=new GaugeAgreementTree(document.querySelector('#agreement-tree'));
+  let agreementLoading=false;
+  const performanceView=new GaugePerformanceSummary(document.querySelector('#performance-summary'));
   const app=document.querySelector('#app'),panel=document.querySelector('#load-state');
   // Keep the library header and its delegated controls at the top of the page.
-  view.el.querySelector('.pl-header').after(document.querySelector('.connection'),queuePanel,document.querySelector('#validation-summary'),panel);
+  view.el.querySelector('.pl-header').after(document.querySelector('.connection'),document.querySelector('#performance-summary'),document.querySelector('#agreement-tree'),panel);
+  view.el.querySelector('.pl-footer').before(document.querySelector('#validation-summary'),queuePanel);
   app.hidden=false;
   function showState(title,message){
-    queuePanel.hidden=true;validationView.update(null);
+    queuePanel.hidden=true;agreementView.update(null);validationView.update(null);performanceView.update(null);
     app.dataset.loading='true';panel.hidden=false;picker.disabled=true;
     document.querySelector('#load-title').textContent=title;
     document.querySelector('#load-message').textContent=message;
@@ -44,6 +48,15 @@
       app.dataset.loading='false';panel.hidden=true;picker.disabled=false;
       const selected=runs.find(r=>r.id===runId),s=snapshot.stats,summary=selected?.summary;
       validationView.update(summary?.validation);
+      if(runId && !agreementLoading){
+        agreementLoading=true;
+        fetch(scoped('/v1/agreement?run_id='+encodeURIComponent(runId)),{cache:'no-store',signal:AbortSignal.timeout(10000)})
+          .then(r=>{if(!r.ok)throw new Error('Agreement results unavailable');return r.json();})
+          .then(data=>{if(current===generation)agreementView.update(data);})
+          .catch(()=>{if(current===generation){agreementView.update(null);}})
+          .finally(()=>{agreementLoading=false;});
+      }
+      performanceView.update(summary?.performance);
       if(s.active_run_id)lastLiveRunId=s.active_run_id;
       const currentRun=!runId || runId===s.active_run_id || (!s.active_run_id && runId===lastLiveRunId);
       queuePanel.hidden=false;queuePanel.dataset.live=String(currentRun);
@@ -53,10 +66,10 @@
           queued:jobs.filter(j=>j.status==='pending').length,active:jobs.filter(j=>j.status==='running').length,
           completed:jobs.filter(j=>j.status==='completed').length,failed:jobs.filter(j=>j.status==='error').length,
           queue_dropped:jobs.filter(j=>j.status==='skipped' && j.reason==='Comparison queue full').length};
-        const metrics=currentRun?s:saved;
-        const total=metrics.comparison_jobs ?? metrics.received,finished=currentRun
-          ?s.completed+s.failed+s.queue_dropped+s.ineligible*(s.models?.length||1)
-          :saved.completed+saved.failed+jobs.filter(j=>j.status==='skipped').length;
+        const metrics=runId?{...saved,workers:currentRun?s.workers:saved.workers}:s;
+        const total=metrics.comparison_jobs ?? metrics.received,finished=runId
+          ?saved.completed+saved.failed+jobs.filter(j=>j.status==='skipped').length
+          :s.completed+s.failed+s.queue_dropped+s.ineligible*(s.models?.length||1);
         for(const metric of ['queued','active','completed','failed'])document.querySelector('#queue-'+metric).textContent=Number(metrics[metric]||0).toLocaleString();
         document.querySelector('#queue-dropped').textContent=Number(metrics.queue_dropped||0).toLocaleString();
         const progress=document.querySelector('#queue-progress');progress.max=Math.max(1,total);progress.value=finished;
@@ -70,7 +83,7 @@
       const judgeCounts=status=>judged.filter(j=>j.status===status).length;
       if(s.configuration_note)document.querySelector('#queue-note').textContent+=' '+s.configuration_note;
       document.querySelector('#queue-note').textContent+=` Judging: ${judgeCounts('pending')} queued · ${judgeCounts('running')} active · ${judgeCounts('completed')} decided · ${judgeCounts('uncertain')} uncertain · ${judgeCounts('error')} errors · ${judgeCounts('skipped')} skipped.`;
-      const baseline=summary?.baseline?.calls||0,captured=summary?.during_saturation?.calls||0;
+      const baseline=summary?.performance?.arms.native.calls ?? summary?.baseline?.calls ?? 0,captured=summary?.performance?.arms.gauge.calls ?? summary?.during_saturation?.calls ?? 0;
       state.textContent=selected
         ? `${selected.status} · ${snapshot.loaded}/${snapshot.total} saved captures${summary?` · ${baseline+captured} OpenAI calls (${baseline} native baseline)` : ''}`
         : `Queue ${s.queued} · active ${s.active} · ${s.paused?'dispatch paused':'dispatch enabled'} · ${snapshot.loaded}/${snapshot.total} captures`;
@@ -117,6 +130,6 @@
   picker.addEventListener('change',()=>connect(picker.value));
   projectPicker.addEventListener('change',()=>{projectId=projectPicker.value;connectBackend();});
   disconnect.addEventListener('click',()=>{generation++;active=false;view.disconnect();view.setData([]);form.classList.remove('session-connected');view.notice('Disconnected');view.el.querySelector('.pl-connection').textContent='Disconnected';showState('Dashboard disconnected','Saved runs remain on the backend. Reconnect to load them.');disconnect.disabled=true;});
-  window.addEventListener('pagehide',()=>{generation++;if(active)view.disconnect();view.destroy();},{once:true});
+  window.addEventListener('pagehide',()=>{generation++;if(active)view.disconnect();performanceView.destroy();agreementView.destroy();view.destroy();},{once:true});
   connectBackend();
 })();

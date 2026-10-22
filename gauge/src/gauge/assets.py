@@ -12,6 +12,8 @@ _SOURCE_FILES = {
     "gauge-adapter.js": "gauge/dashboard/gauge-adapter.js",
     "dashboard.css": "gauge/dashboard/dashboard.css",
     "validation-summary.js": "gauge/dashboard/validation-summary.js",
+    "agreement-tree.js": "gauge/dashboard/agreement-tree.js",
+    "performance-summary.js": "gauge/dashboard/performance-summary.js",
 }
 
 

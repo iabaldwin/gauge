@@ -36,6 +36,8 @@ def main() -> None:
             "index.html",
             "app.js",
             "gauge-adapter.js",
+            "performance-summary.js",
+            "agreement-tree.js",
         ):
             if "gauge/_assets/" + asset not in names:
                 raise RuntimeError("Missing bundled UI asset: " + asset)

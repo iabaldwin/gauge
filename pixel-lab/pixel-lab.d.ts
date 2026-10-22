@@ -108,7 +108,7 @@ export interface HistogramData {
 export function binHistogram(series: HistogramSeries[], bins?: number): HistogramData;
 export function comparisonDistributions(requests: NormalizedRequest[], metric: 'latency' | 'reasoning' | 'nonReasoning' | 'answer', model?: string): HistogramSeries[];
 export class Histogram {
-  constructor(element: Mount, options?: {title?: string; subtitle?: string; unit?: string; bins?: number; series?: HistogramSeries[]});
+  constructor(element: Mount, options?: {title?: string; subtitle?: string; unit?: string; bins?: number; layout?: 'grouped' | 'overlay'; series?: HistogramSeries[]});
   update(series: HistogramSeries[]): void;
   setBins(bins: number): void;
   destroy(): void;

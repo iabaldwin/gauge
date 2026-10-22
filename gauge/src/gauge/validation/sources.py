@@ -17,6 +17,7 @@ class Source:
     split: str
     license: str
     attribution: str
+    sha256: str | None = None
 
 
 BANKING = Source(
@@ -45,6 +46,35 @@ SQUAD = Source(
     "validation",
     "CC-BY-SA-4.0",
     "Rajpurkar et al., Know What You Don't Know: Unanswerable Questions for SQuAD (2018)",
+)
+
+
+COQA = Source(
+    "coqa",
+    "https://downloads.cs.stanford.edu/nlp/data/coqa/coqa-dev-v1.0.json",
+    "v1.0",
+    "dev / wikipedia + gutenberg + cnn",
+    "CC-BY-SA-4.0 / Apache-2.0",
+    "Reddy, Chen and Manning, CoQA: A Conversational Question Answering Challenge (2019)",
+    "dfa367a9733ce53222918d0231d9b3bedc2b8ee831a2845f62dfc70701f2540a",
+)
+QUAC = Source(
+    "quac",
+    "https://s3.amazonaws.com/my89public/quac/val_v0.2.json",
+    "v0.2",
+    "validation",
+    "CC-BY-SA-4.0",
+    "Choi et al., QuAC: Question Answering in Context (2018)",
+    "09e622916280ba04c9352acb1bc5bbe80f11a2598f6f34e934c51d9e6570f378",
+)
+MULTIIF = Source(
+    "multiif",
+    "https://huggingface.co/datasets/facebook/Multi-IF/resolve/"
+    "0ab97ce0b45c7f57772e8ba2ac1616f4b00bd3aa/multiIF_20241018.csv",
+    "0ab97ce0b45c7f57772e8ba2ac1616f4b00bd3aa",
+    "test / English bounded subset",
+    "CC-BY-NC-2.0",
+    "He et al., Multi-IF (2024)",
 )
 
 
@@ -77,11 +107,17 @@ def fetch(source: Source, cache: Path) -> tuple[Path, dict]:
                             out.write(chunk)
             raw = temporary.read_bytes()
             info = {**asdict(source), "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+            if source.sha256 and info["sha256"] != source.sha256:
+                raise ValueError("Pinned dataset checksum mismatch")
             temporary.replace(path)
             receipt.write_text(json.dumps(info, indent=2) + "\n")
         finally:
             temporary.unlink(missing_ok=True)
     info = json.loads(receipt.read_text())
-    if info["url"] != source.url or hashlib.sha256(path.read_bytes()).hexdigest() != info["sha256"]:
+    if (
+        info["url"] != source.url
+        or hashlib.sha256(path.read_bytes()).hexdigest() != info["sha256"]
+        or (source.sha256 and info["sha256"] != source.sha256)
+    ):
         raise ValueError(f"Dataset cache checksum mismatch: {path}")
     return path, info

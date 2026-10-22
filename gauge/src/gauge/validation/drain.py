@@ -9,16 +9,22 @@ import time
 from gauge.validation.backend import BackendClient
 
 
-async def preflight(backend: BackendClient) -> None:
+async def preflight(backend: BackendClient, run_id: str) -> None:
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
         state = await asyncio.to_thread(backend.get, "/stats")
-        if state["failed"]:
+        records = await asyncio.to_thread(backend.records, run_id)
+        jobs = [job for record in records for job in record["comparisons"]]
+        if any(job["status"] == "error" for job in jobs):
             raise RuntimeError("First comparison failed; remaining source budget not dispatched")
         judges = state.get("judging", {})
         if judges.get("errors"):
             raise RuntimeError("First JEV judgment failed; remaining source budget not dispatched")
-        if state["completed"] == 3 and judges.get("completed", 0) + judges.get("uncertain", 0) == 3:
+        if len(jobs) == 3 and all(
+            job["status"] == "completed"
+            and job.get("judgment", {}).get("status") in {"completed", "uncertain"}
+            for job in jobs
+        ):
             print(
                 json.dumps({"preflight": "OpenAI, three Fireworks models, and JEV passed"}),
                 flush=True,
@@ -38,12 +44,7 @@ async def drain(backend: BackendClient, run_id: str, wait_seconds: int) -> tuple
             raise TimeoutError("Comparison/judge drain timed out")
         if time.monotonic() - last_progress >= 15:
             print(
-                json.dumps(
-                    {
-                        k: result.get(k)
-                        for k in ("completed", "failed", "queued", "active", "judging")
-                    }
-                ),
+                json.dumps({k: result.get(k) for k in ("queued", "active", "judging")}),
                 flush=True,
             )
             last_progress = time.monotonic()
@@ -84,4 +85,10 @@ async def drain(backend: BackendClient, run_id: str, wait_seconds: int) -> tuple
     while current["judging"]["queued"] or current["judging"]["active"]:
         await asyncio.sleep(0.5)
         current = await state()
-    return current, await asyncio.to_thread(backend.records, run_id)
+    records = await asyncio.to_thread(backend.records, run_id)
+    jobs = [job for record in records for job in record["comparisons"]]
+    current.update(
+        completed=sum(j["status"] == "completed" for j in jobs),
+        failed=sum(j["status"] == "error" for j in jobs),
+    )
+    return current, records

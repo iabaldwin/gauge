@@ -16,9 +16,9 @@ def main():
     prepare.add_argument("--cache", type=Path, default=Path("data/validation-cache"))
     prepare.add_argument("--seed", type=int, default=42)
     prepare.add_argument(
-        "--fixed-prefix",
-        action="store_true",
-        help="Evaluate each turn with recorded assistant history",
+        "--dataset",
+        choices=["all", "banking77", "squad2", "coqa", "quac", "multiif"],
+        default="all",
     )
     check = commands.add_parser("check", help="Offline correlation checks on real dataset fixtures")
     check.add_argument("manifest", type=Path)
@@ -35,12 +35,33 @@ def main():
     )
     live.add_argument("--concurrency", type=int, default=4)
     live.add_argument("--wait-seconds", type=int, default=1200)
+    agreement = commands.add_parser(
+        "agreement", help="Build agreement trees from saved conversation results"
+    )
+    agreement.add_argument("report", type=Path)
+    agreement.add_argument("--connection", type=Path, default=Path(".gauge/service.json"))
+    agreement.add_argument(
+        "--judge",
+        action="store_true",
+        help="Spend up to 2000 backend JEV calls; no inference reruns",
+    )
     args = parser.parse_args()
     if args.command == "prepare":
         from gauge.validation.suite import prepare
 
-        result = prepare(args.output, args.cache, args.profile, args.seed, args.fixed_prefix)
+        result = prepare(args.output, args.cache, args.profile, args.seed, args.dataset)
         print(json.dumps({k: result[k] for k in ("profile", "source_calls", "sha256")}))
+    elif args.command == "agreement":
+        from gauge.validation.agreement import evaluate
+        from gauge.validation.backend import BackendClient
+        from gauge.validation.report import render
+
+        report = json.loads(args.report.read_text())
+        with BackendClient(args.connection) as backend:
+            report["agreement"] = asyncio.run(evaluate(backend, report, judge=args.judge))
+            print(backend.url + "/dashboard?run=" + report["run_id"])
+        args.report.write_text(json.dumps(report, indent=2) + "\n")
+        args.report.with_suffix(".html").write_text(render(report))
     elif args.command == "check":
         from gauge.validation.checks import offline
         from gauge.validation.records import read_suite

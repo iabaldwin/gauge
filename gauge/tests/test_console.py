@@ -91,7 +91,7 @@ def test_active_runs_and_cross_run_context_cannot_be_cleared(tmp_path):
     assert len(RunMaintenance(store.path).preview(None)["run_ids"]) == 2
 
 
-@pytest.mark.parametrize("busy", ["run", "comparison", "judge"])
+@pytest.mark.parametrize("busy", ["run", "comparison", "judge", "reference"])
 def test_backend_requires_idle_before_clear(tmp_path, busy):
     store = saved(tmp_path)
     backend = Backend.__new__(Backend)
@@ -100,6 +100,9 @@ def test_backend_requires_idle_before_clear(tmp_path, busy):
     backend.jobs = SimpleNamespace(unfinished_tasks=int(busy == "comparison"))
     backend.judging = SimpleNamespace(
         lock=threading.Lock(), inflight={1} if busy == "judge" else set()
+    )
+    backend.agreement = SimpleNamespace(
+        lock=threading.Lock(), inflight={1} if busy == "reference" else set()
     )
     preview = RunMaintenance(store.path).preview(["run_1"])
     with pytest.raises(MaintenanceConflict, match="idle"):

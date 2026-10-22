@@ -15,7 +15,7 @@
       const body=add('div','');body.className='validation-body';
       const c=validation.correlation || {};
       add('p',`${c.mapped_calls ?? '—'}/${c.expected_calls ?? '—'} exchanges matched · ${c.correct_parent_links ?? '—'}/${c.explicit_parent_links ?? '—'} explicit parent links · ${c.false_trace_merges ?? '—'} false merges · ${c.history_only_turns_left_unresolved ?? '—'} history-only turns left unresolved`,body);
-      add('p','Quality uses dataset labels. Literal agreement with the source is shown separately below. Scripted dialogue quality is unscored.',body);
+      add('p','Quality uses dataset labels. Literal agreement with the source is shown separately below. Conversation quality uses answer annotations or instruction checkers.',body);
       const scroll=add('div','',body);scroll.className='validation-table-scroll';
       const table=add('table','',scroll);table.setAttribute('aria-label','Dataset quality scores');
       const head=add('tr','',add('thead','',table));

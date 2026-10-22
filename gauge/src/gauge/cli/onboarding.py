@@ -141,6 +141,7 @@ def setup_command(args, console) -> None:
                         or stats["queued"]
                         or stats["judging"]["active"]
                         or stats["judging"]["queued"]
+                        or stats.get("reference_judging", {}).get("pending")
                     ):
                         raise ConsoleError(
                             "Wait for comparison and judge queues to drain before stopping"

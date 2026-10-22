@@ -92,6 +92,9 @@ chart.update([
 ]);
 ```
 
+Set `layout: 'overlay'` for translucent overlapping bars, useful for A/B
+comparisons. The default `grouped` layout places bars beside each other.
+
 All series share equal-width bins and a zero-based horizontal axis. The upper
 edge of the final bin is inclusive. Unknown, negative, and non-finite values
 are excluded; zero is a valid measurement. Legends show each series' sample

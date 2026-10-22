@@ -25,12 +25,15 @@ def render(report: dict) -> str:
         )
     css = asset("pixel-lab.css").read_text()
     script = asset("pixel-lab.js").read_text()
+    agreement = asset("agreement-tree.js").read_text()
+    agreement_css = asset("dashboard.css").read_text()
     adapter = asset("gauge-adapter.js").read_text()
     checks = " · ".join(f"{k}: {'PASS' if v else 'FAIL'}" for k, v in report["checks"].items())
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Public dataset validation · Gauge</title>
 <style>{css}
+{agreement_css}
 body{{margin:20px;background:#dce3ef}}
 .validation{{background:white;border:2px solid #142449;padding:24px;
 margin-bottom:20px;box-shadow:4px 4px 0 #b6c3d9}}
@@ -47,14 +50,16 @@ text-align:left}}
 <p>{escape(report["run_id"])} · {report["source_calls"]} source calls
 · fixture {escape(report["manifest_sha256"][:16])}</p>
 <p>{escape(checks)}</p><p>Quality below uses public dataset labels, not OpenAI answers. 
-Dialogue replay has no live answer oracle and stays unscored. 
+Conversation quality uses supplied passages, answer annotations, and instruction checkers. 
 Exact agreement in the comparison table is a separate metric.</p>
 <div class="quality-scroll"><table>
 <thead><tr><th>Dataset / model</th><th>Calls</th><th>Scored</th><th>Quality</th></tr></thead>
 <tbody>{"".join(rows)}</tbody></table></div></header>
+<section id="agreement-tree" class="pl agreement-tree" hidden></section>
 <div id="app"></div><script type="application/json" id="validation-data">{payload}</script>
-<script>{script}</script><script>{adapter}</script><script>
+<script>{script}</script><script>{agreement}</script><script>{adapter}</script><script>
 const data=JSON.parse(document.querySelector('#validation-data').textContent);
+new GaugeAgreementTree(document.querySelector('#agreement-tree')).update(data.agreement);
 const records=data.records.map(row=>{{
 const r=GaugeDashboard.toRequest(row);
 r.metadata.correlation=data.correlation.graph[r.id];return r;}});

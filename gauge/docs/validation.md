@@ -1,54 +1,69 @@
 # Public-data validation
 
-Gauge validation measures two different things: whether capture/correlation/replay
-works, and whether model outputs match independently supplied dataset labels.
-Literal agreement with OpenAI is never substituted for accuracy.
+Quality uses independent dataset labels and instruction checks. Pairwise JEV
+agreement with OpenAI remains a separate measurement. MultiWOZ is excluded from
+the quality suite: its historical answers require database/tool facts that the
+request does not contain. Existing archived runs remain inspectable as replay tests.
 
-## Code decomposition
+## Run it
 
-```text
-gauge/
-  validation/                 # benchmark process; not imported by the SDK
-    records.py                # Scenario and checksummed manifest contract
-    sources.py                # immutable source URLs, cache, checksums, attribution
-    datasets.py               # BANKING77 / MultiWOZ / SQuAD format adapters
-    suite.py                  # seeded sampling and versioned prompt contracts
-    protocols.py              # ordinary native OpenAI client calls
-    prefixes.py               # recorded conversation prefixes and independent audit
-    drain.py                  # comparison/judge drain and bounded judge backfill
-    checks.py                 # hidden-oracle correlation checks and offline replay
-    scoring.py                # gold-label accuracy, JSON validity, SQuAD EM/F1
-    backend.py                # internal loopback control/feed client
-    runner.py                 # budgets, concurrency, execution and artifact lifecycle
-    report.py                 # portable Pixel Lab report; no model invocation
-    __main__.py               # argument parsing and command routing only
-  backend/
-    correlation.py            # evidence-based trace/workload reconstruction
-    replay.py                 # bounded text context materialization
-    server.py                 # internal ingestion + isolated comparison workers
-    store.py                  # SQLite persistence and read models
+From the repository root, with the existing source, Fireworks, and JEV credentials:
+
+```sh
+make evals-all EVAL_PROFILE=smoke
+make evals-coqa
+make evals-quac
+make evals-multiif
+make evals-banking
+make evals-squad
+make evals-all
 ```
 
-Paths above are relative to `gauge/src/gauge`. Provider calls only occur in the
-protocol driver and the separate backend worker. Dataset adapters have no provider
-clients; scoring has no network access. Correlation receives capture envelopes,
-never dataset identifiers, labels, expected parent links, or benchmark annotations.
-The serving SDK and its byte/queue/time budgets are unchanged.
+Targets prepare checksummed fixtures, check correlation offline, restart the idle
+managed backend with validation dependencies, then dispatch. Restart refuses if
+work is pending. Saved results persist. `EVAL_SOURCE_MODEL`, `EVAL_CONCURRENCY`
+(default 4), and `EVAL_OUTPUT_DIR` override the corresponding settings.
 
-## Data and profiles
+Preparation alone does not invoke any models:
 
-The first milestone includes:
+```sh
+uv run --project gauge --extra validation python -m gauge.validation prepare \
+  --profile full --dataset coqa --output out/coqa.manifest.json
+```
 
-| Dataset | Source / split | Smoke calls | Full calls | Scoring |
-| --- | --- | ---: | ---: | --- |
-| BANKING77 | PolyAI, test | 10 | 400 | Exact intent-label accuracy |
-| SQuAD 2.0 | validation, balanced answerable/unanswerable | 8 | 200 | JSON validity, normalized exact match, token F1 |
-| MultiWOZ 2.2 | test shard 001 | 32 | 400 | Capture and correlation only |
-| Total | | 50 | 1,000 | |
+The source defaults to `gpt-4.1-nano` with direct OpenAI credentials, or
+`@openai-foundations/gpt-5.4-mini` through the configured gateway. The three
+Fireworks candidates are Qwen3.8 Max, GPT-OSS-120B, and DeepSeek v4.1 Flash.
+Source/candidate output caps are 1,024/2,048 tokens; only GPT-OSS receives low
+reasoning effort. Incomplete outputs are unscored, never silent passes.
 
-With `prepare --fixed-prefix`, MultiWOZ uses eight smoke / 100 full distinct
-dialogue excerpts, each four user turns long. Half use Chat Completions and half
-use Responses. Each request contains its complete recorded prefix:
+## Datasets and budgets
+
+| Dataset | Smoke source calls | Full source calls | Independent metric |
+| --- | ---: | ---: | --- |
+| BANKING77 | 5 | 100 | Intent accuracy |
+| SQuAD 2.0 | 6 | 100 | JSON validity, EM/F1; balanced answerability |
+| CoQA | 2 × 4 = 8 | 50 × 4 = 200 | Multi-annotation answer EM/F1 |
+| QuAC | 2 × 4 = 8 | 50 × 4 = 200 | Answer F1 and human equivalence |
+| Multi-IF English subset | 2 × 3 = 6 | 50 × 3 = 150 | Strict prompt/instruction success |
+| **Total** | **33** | **750** | **99 / 2,250 candidate calls** |
+
+The first source request checks all three candidates and JEV before the remaining
+budget is dispatched. Pairwise judgments have one bounded backfill; inference is
+not rerun. Native benchmark metrics cost no model calls. QA tree judgments use
+JEV in the backend: up to 1,600 additional decisions for the full suite (source
+and three candidates, 400 CoQA/QuAC turns), with a separate 2,000-call budget.
+The SDK still captures ordinary calls with no dataset annotations.
+
+These are sampled, bounded evaluations, not official leaderboard submissions.
+Selection is seeded per dataset, so individual and combined targets select the
+same cases. Complete manifests record sources, hashes, IDs, prompts, reference
+annotations, history policy, exclusions, and call budgets.
+
+## Conversation protocol
+
+CoQA and QuAC supply the passage in every request and use recorded assistant
+history. The current reference answer never enters the request:
 
 ```text
 u1                         -> e1
@@ -56,152 +71,87 @@ u1, a1, u2                 -> e2
 u1, a1, u2, a2, u3         -> e3
 ```
 
-Here `a1` and `a2` are dataset replies; generated outputs never enter later
-requests. The dispatcher builds these independent cases, and the backend compares
-each case normally. No response-chain or Conversation IDs are required. The
-report audits every captured request against its recorded prefix.
+The first four turns of each selected conversation are evaluated. CoQA includes
+all human answer annotations, including duplicates, and uses the official
+leave-one-annotation-out EM/F1 calculation. The initial domains are Wikipedia,
+Gutenberg, and CNN. Conversations exceeding 14,000 passage characters are excluded.
 
-Without that flag, the protocol-validation profile uses two smoke / 25
-full excerpts across four protocols: Chat Completions with full history,
-Responses with full history, Responses with `previous_response_id`, and Responses
-with Conversations. That profile uses generated replies in live continuations.
+QuAC includes article title, section title, and background for orientation, with
+answers restricted to the supplied passage. It evaluates the answer-only subtask; yes/no and follow-up labels are not scored.
+Unanswerable reference majorities/ties use `CANNOTANSWER`. Human-agreement F1 below
+0.4 is excluded from quality averages and remains visible as unscored coverage.
+Answer F1 and human equivalence remain benchmark metrics. Neither they nor CoQA
+full-credit F1 determine tree agreement. JEV judges meaning against all human
+annotations and the full request context, accepting supported paraphrases.
+Questionable references, low confidence, and judge errors remain unresolved.
 
-This is scripted dialogue replay, not a task-success benchmark: later dataset user
-turns were written for historical assistant replies and may not fit a new reply.
-Dialogue has no independent gold accuracy score. JEV assesses semantic agreement
-and instruction compliance for complete output pairs; OpenAI is a comparison
-baseline, not ground truth. CLINC/OOS, WildChat, BFCL, GSM8K, tool
-execution, and independent closed-loop candidate rollouts are later milestones;
-this implementation does not claim to support them.
+Multi-IF has instructions and checkers but no recorded assistant answers. Gauge
+uses a **shared-source-history adaptation**: all candidates see the same previous
+OpenAI replies. Those replies are context, never ground truth. If a source reply
+fails or truncates, dependent later turns are marked undispatched/unscored.
+Independent CoQA/QuAC turns continue after source failures.
 
-Sources use immutable commit IDs. Downloaded files have SHA-256 receipts;
-corrupt/incomplete cache entries fail closed. Selection is seeded. The manifest
-includes source revisions, source-row IDs, split, license, attribution, prompt
-contracts, call counts, expected labels and its own checksum. Keep manifests and
-reports with published results. Dataset contents, caches and outputs stay outside
-Git. BANKING77 is CC-BY-4.0, MultiWOZ's source release is MIT, and SQuAD 2.0 is
-CC-BY-SA-4.0; preserve their attribution and applicable redistribution terms.
+The English-prompt Multi-IF subset can request outputs in other languages. It
+includes only complete three-turn rows, prompts up to
+4,000 characters, explicit deterministic checker arguments, and word requirements
+up to 250. Two checkers requiring downloaded NLTK sentence models are excluded:
+`length_constraints:number_sentences` and `change_case:capital_word_frequency`.
+The pinned upstream strict checkers use language-detection seed 0; Thai tokenization
+is unsupported and produces an unscored result. No runtime model downloads occur.
+The manifest identifies this adaptation; it is not the full multilingual benchmark.
 
-## Run it
+## Dashboard and persistence
 
-Install the optional benchmark dependencies from the repository root:
+The conversation tree shows the first confirmed semantic departure for CoQA/QuAC
+and the first native instruction failure for Multi-IF. It includes agreement
+through each turn, human reference annotations, evidence, complete request context,
+outputs, JEV decisions, and separate benchmark metrics.
+An earlier unscored turn prevents an exact first-failure claim. A later pass does
+not erase an earlier failure. This is prefix evaluation, not autonomous rollouts.
 
-```sh
-uv sync --project gauge --extra validation --extra dev
-```
-
-Prepare a fixture set (downloads once; no inference):
-
-```sh
-gauge/.venv/bin/python -m gauge.validation prepare \
-  --profile smoke --fixed-prefix --output out/validation-smoke.manifest.json
-```
-
-Validate correlation offline using real dataset text plus adversarial duplicate
-calls and shuffled/interleaved delivery (no inference):
+Runs persist in the backend database. JSON reports and portable Pixel Lab HTML
+are written beside the manifest. To register and judge a saved report without
+rerunning source or candidate inference:
 
 ```sh
-gauge/.venv/bin/python -m gauge.validation check \
-  out/validation-smoke.manifest.json --output out/validation-smoke-offline.json
+uv run --project gauge --extra validation python -m gauge.validation agreement out/evals/REPORT.json --judge
 ```
 
-Run against an idle managed backend with source/provider credentials configured:
+`--judge` spends backend JEV calls on unjudged or failed reference decisions;
+completed judgments are reused. Omitting it refreshes saved results without paid
+work. Multi-IF uses its explicit native checks and never enters the QA judge queue.
+Viewing results never starts inference or judging. Every explicit resubmission
+remains bounded by the backend reference budget.
 
-```sh
-gauge/.venv/bin/gauge backend start
-gauge/.venv/bin/python -m gauge.validation run \
-  out/validation-smoke.manifest.json --output out/validation-smoke.json
-```
+## Code decomposition
 
-The source defaults to `gpt-4.1-nano` with direct OpenAI credentials, or
-`@openai-foundations/gpt-5.4-mini` through the configured Portkey gateway. Choose an
-explicit `--source-model` for a different supported model/endpoint. The backend
-compares Qwen3.8 Max, GPT-OSS-120B, and DeepSeek v4.1 Flash on Fireworks, using
-independent clients. Only GPT-OSS receives `reasoning_effort=low`; the other models
-use their defaults. These settings and the token caps define this experiment;
-quality results are not provider-default leaderboard scores.
+Paths are under `gauge/src/gauge/`:
 
-For the full first milestone:
+- `validation/sources.py`, `records.py`: pinned downloads, receipts, manifest contract.
+- `validation/datasets.py`, `conversations.py`: raw format adapters and supported subsets.
+- `validation/suite.py`: stable sampling and prompt/history contracts.
+- `validation/dispatch.py`, `protocols.py`: source calls and independent audit ledger.
+- `validation/prefixes.py`, `checks.py`: request-context and trace correlation audits.
+- `validation/runner.py`, `drain.py`: orchestration, budgets, comparison/judge drain.
+- `evaluation/scoring.py`, `instructions.py`: network-free native metrics/checkers.
+- `_vendor/multiif.py`: pinned upstream evaluator with documented English-subset patch.
+- `validation/agreement.py`: register benchmark criteria through the control API.
+- `backend/agreement.py`: persist per-output scores and derive first-failure summaries.
+- `validation/report.py`: portable HTML using the standalone Pixel Lab library.
 
-```sh
-gauge/.venv/bin/python -m gauge.validation prepare \
-  --profile full --fixed-prefix --output out/validation-full.manifest.json
-gauge/.venv/bin/python -m gauge.validation check \
-  out/validation-full.manifest.json --output out/validation-full-offline.json
-gauge/.venv/bin/python -m gauge.validation run \
-  out/validation-full.manifest.json --concurrency 8 --output out/validation-full.json
-```
+History without provider IDs stays unresolved in automatic trace correlation.
+Conversation membership in the benchmark tree comes from the dispatch manifest,
+not guessed content similarity. No labels or grouping IDs are added to SDK calls.
 
-The runner saves a named backend run, full JSON evidence, and a standalone HTML
-report using the shared Pixel Lab library. It leaves the service running. The
-manifest is also part of the run's provenance; keep the manifest beside the report.
+## Sources and attribution
 
-## What the checks establish
+BANKING77 (Casanueva et al., 2020) is CC-BY-4.0; SQuAD 2.0 (Rajpurkar et al., 2018)
+and QuAC (Choi et al., 2018) are CC-BY-SA-4.0. Selected CoQA domains (Reddy, Chen,
+and Manning, 2019) use CC-BY-SA-4.0 / Apache-2.0. Multi-IF data (He et al., 2024)
+is CC-BY-NC-2.0; its evaluator code is separately Apache-2.0. See
+`_vendor/THIRD_PARTY.md` and `MULTIIF_LICENSE` for evaluator provenance.
 
-The harness records expected episode membership and expected parent response IDs
-separately. It maps ordinary returned response IDs to exported captures after
-execution. It does not send benchmark IDs in API metadata, headers, or prompts.
-
-Explicit response links establish parents, and conversation IDs establish common
-membership without inventing turn order. Full history without IDs is marked
-unresolved; similar content alone never merges conversations. Provider response
-IDs are scoped by endpoint. Missing or duplicate response IDs and cycles are
-unresolved. Workloads fingerprint instructions, tool definitions and output
-contracts, excluding changing user content and model identity.
-
-`GET /v1/traces?run_id=...` returns the graph reconstructed from persisted captures
-under the same read authentication as the dashboard. IDs remain stable across
-reconstruction. The graph is a read model, not SDK instrumentation.
-
-Text-only explicit Response chains can be replayed when every parent is captured.
-The backend materializes the original request/response history for each candidate;
-it never forwards OpenAI state IDs to Fireworks or retrieves remote provider state.
-Current-turn instructions are applied according to Responses semantics. Missing
-parents, tools, unsupported parameters, cycles, >64-link chains, and expanded
-contexts above 64 KiB are skipped. Conversations remain capture-only because a
-conversation ID does not prove the backend observed all server-held context.
-
-Expected comparison counts for fixed prefixes:
-
-| Profile | Original captures | Candidate jobs | Completed if providers succeed |
-| --- | ---: | ---: | ---: |
-| Smoke | 50 | 150 | 150 |
-| Full | 1,000 | 3,000 | 3,000 |
-
-The protocol-validation profile deliberately skips remote Conversations:
-
-| Profile | Original captures | Candidate jobs | Completed if providers succeed | Deliberately skipped |
-| --- | ---: | ---: | ---: | ---: |
-| Smoke | 50 | 150 | 126 | 24 |
-| Full | 1,000 | 3,000 | 2,700 | 300 |
-
-Transport success and usable output are separate. Token-limited/incomplete
-candidate outputs remain unscored and visible in quality coverage. Wrong labels
-and invalid JSON receive zero, not an unscored result. Quality is calculated for
-the source and each candidate independently, with scored/total denominators.
-
-Each run checks call completion, capture delivery, explicit links, false merges,
-conversation splits, per-capture candidate joins, supported replay coverage, queue
-drops, comparison errors, and queue recovery. These are infrastructure checks;
-they do not require every model answer to be correct.
-
-## Limits
-
-A full run makes up to 1,000 source model calls and 3,000 candidate calls. Fixed
-prefixes cap source output at 1,024 tokens and candidate output at 2,048 tokens
-including reasoning. The protocol profile uses 256 / 1,024 tokens.
-The smoke run is a separate 50-call run. Conversation creation is an additional
-API operation, not an inference call. SDK retries are disabled. Episode concurrency
-is 1–20, queue capacity is 3,000, and the comparison drain deadline defaults to
-20 minutes (`--wait-seconds`, maximum one hour).
-
-Provider keys remain in process configuration, never reports or browser assets.
-Fixed-prefix runs require an idle backend with JEV enabled and a fresh judge
-budget. The first case checks the source, all three candidates, and JEV before
-dispatching the remainder. The runner waits for judgments and makes one bounded
-backfill pass for missing/error judgments, without repeating provider inference.
-Judge retries count against the backend's configured budget (normally 3,000).
-Errors and truncated outputs remain visible in coverage and final checks.
-
-Failed source turns do not prevent later independent fixed-prefix cases. In the
-protocol profile they stop their own episode. No profile executes tools automatically.
+Data is downloaded separately and is not bundled in the wheel. Preserve source
+attributions and dataset license terms when sharing derived fixtures/results.
+Pinned source URLs, revisions, and checksums are in `validation/sources.py` and
+saved receipts. Corrupt cache entries fail closed rather than being replaced.

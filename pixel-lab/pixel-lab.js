@@ -205,7 +205,7 @@
   }
   class Histogram extends Component {
     constructor(el,options={}) {
-      super(el,options);this.el.classList.add('pl-histogram');this.series=[];this.hiddenSeries=new Set();this.bins=options.bins??8;this.signature='';
+      super(el,options);this.el.classList.add('pl-histogram');this.el.classList.toggle('pl-hist-overlay',options.layout==='overlay');this.series=[];this.hiddenSeries=new Set();this.bins=options.bins??8;this.signature='';
       this.listen('click',event=>{
         const toggle=event.target.closest('[data-hist-series]');if(!toggle)return;
         const id=toggle.dataset.histSeries;
@@ -235,11 +235,12 @@
       const visible=data.series.filter(s=>!this.hiddenSeries.has(s.id));
       const sampleCount=visible.reduce((n,s)=>n+s.values.length,0), peak=Math.max(1,...visible.flatMap(s=>s.counts));
       const left=34,top=16,width=412,height=148,bottom=top+height;
-      const slot=width/this.bins,groupWidth=slot*.76,barWidth=groupWidth/Math.max(visible.length,1);
+      const overlay=this.options.layout==='overlay';
+      const slot=width/this.bins,groupWidth=slot*.76,barWidth=overlay?groupWidth:groupWidth/Math.max(visible.length,1);
       const guides=[0,.5,1].map(f=>`<line class="pl-hist-grid-line" x1="${left}" x2="${left+width}" y1="${bottom-height*f}" y2="${bottom-height*f}"/><text class="pl-hist-axis" x="${left-9}" y="${bottom-height*f+4}" text-anchor="end">${Number((peak*f).toFixed(1))}</text>`).join('');
       const bars=visible.map(s=>s.counts.map((count,index)=>{
         if(!count)return '';
-        const x=left+slot*index+(slot-groupWidth)/2+visible.indexOf(s)*barWidth;
+        const x=left+slot*index+(slot-groupWidth)/2+(overlay?0:visible.indexOf(s)*barWidth);
         const h=count/peak*height;
         const range=`${this.format(data.bins[index].start)} to ${this.format(data.bins[index].end)}${index===this.bins-1?' inclusive':' (upper bound excluded)'}`;
         return `<rect class="pl-hist-bar pl-hist-${s.color}" x="${x}" y="${bottom-h}" width="${Math.max(.5,barWidth-2)}" height="${h}" tabindex="0" role="img" data-hist-bin="${index}" aria-label="${esc(s.label)} · ${esc(range)} · ${count} of ${s.values.length} measurements"/>`;
@@ -248,7 +249,7 @@
       const chart=sampleCount?`<svg class="pl-hist-svg" viewBox="0 0 470 195" role="group" aria-label="${esc(this.options.title || 'Histogram')} bins"><text class="pl-hist-axis" x="${left}" y="9">COUNT</text>${guides}${bars}${labels}</svg>`:`<div class="pl-hist-empty">${data.series.some(s=>s.values.length)?'Select a model in the legend to show its distribution.':'No reported measurements for this comparison.'}</div>`;
       this.el.innerHTML=`<header class="pl-hist-heading"><h3>${esc(this.options.title || 'Histogram')}</h3><span>${sampleCount} measurements</span></header>${this.options.subtitle?`<p class="pl-hist-subtitle">${esc(this.options.subtitle)}</p>`:''}${chart}<div class="pl-hist-legend">${data.series.map(s=>`<button data-hist-series="${esc(s.id)}" aria-pressed="${!this.hiddenSeries.has(s.id)}" class="pl-hist-${s.color}"><i aria-hidden="true"></i><span>${esc(s.label)}<small>n=${s.values.length} · median ${esc(this.format(s.median))} · p95 ${esc(this.format(s.p95))}</small></span></button>`).join('')}</div><div class="pl-hist-tooltip" role="status">Hover or focus a bar for its range and count.</div>`;
     }
-    destroy() { this.el.classList.remove('pl-histogram');super.destroy(); }
+    destroy() { this.el.classList.remove('pl-histogram','pl-hist-overlay');super.destroy(); }
   }
   function comparisonDistributions(requests, metric, model='') {
     const groups=new Map(), originals=new Set();

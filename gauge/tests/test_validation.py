@@ -4,8 +4,8 @@ import pytest
 
 from gauge.backend.correlation import correlate, workload_id
 from gauge.backend.replay import ReplayUnavailable, materialize
+from gauge.evaluation.scoring import aggregate, grade
 from gauge.validation.records import Scenario, read_suite, write_suite
-from gauge.validation.scoring import aggregate, grade
 
 
 def capture(call, response, previous=None, conversation=None, content="question", answer="answer"):
@@ -383,19 +383,38 @@ def test_fixed_suite_samples_unique_conversations_with_self_contained_protocols(
             for i in range(200)
         ],
     )
-    monkeypatch.setattr(
-        suite.datasets,
-        "dialogues",
-        lambda _: [
-            {"id": str(i), "turns": [{"user": f"u{j}", "assistant": f"a{j}"} for j in range(4)]}
-            for i in range(100)
-        ],
-    )
-    path = tmp_path / "fixed.json"
-    manifest = suite.prepare(path, tmp_path, "full", fixed_prefix=True)
+    for name in ("coqa", "quac", "multiif"):
+        monkeypatch.setattr(
+            suite.conversations,
+            name,
+            lambda _, name=name: [
+                {
+                    "id": str(i),
+                    "passage": "supplied evidence",
+                    "title": "Article",
+                    "section": "Section",
+                    "background": "Background",
+                    "domain": "fixture",
+                    "turns": [
+                        {"user": f"u{j}", "assistant": f"a{j}", "expected": {"answers": [f"a{j}"]}}
+                        for j in range(3 if name == "multiif" else 4)
+                    ],
+                }
+                for i in range(100)
+            ],
+        )
+    path = tmp_path / "quality.json"
+    manifest = suite.prepare(path, tmp_path, "full")
     _, scenarios = read_suite(path)
-    chats = [s for s in scenarios if s.task == "dialogue"]
-    assert manifest["dispatch_mode"] == "fixed-prefix"
-    assert manifest["source_calls"] == 1000
-    assert len(chats) == len({s.provenance["source_id"] for s in chats}) == 100
+    assert manifest["dispatch_mode"] == "quality-suite"
+    assert manifest["source_calls"] == 750
+    for name in ("coqa", "quac", "multiif"):
+        conversations = [s for s in scenarios if s.dataset == name]
+        assert len(conversations) == len({s.id for s in conversations}) == 50
+        assert all(
+            s.history_mode == ("source" if name == "multiif" else "recorded") for s in conversations
+        )
     assert {s.protocol for s in scenarios} == {"chat", "responses"}
+    alone = tmp_path / "coqa.json"
+    suite.prepare(alone, tmp_path, "full", dataset="coqa")
+    assert read_suite(alone)[1] == [s for s in scenarios if s.dataset == "coqa"]

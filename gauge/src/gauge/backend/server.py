@@ -22,6 +22,7 @@ import httpx
 from openai import OpenAI
 
 from gauge.assets import asset
+from gauge.backend.agreement import AgreementEvaluator
 from gauge.backend.judge import RUBRIC
 from gauge.backend.judging import JudgeQueue
 from gauge.backend.maintenance import MaintenanceConflict, RunMaintenance
@@ -42,6 +43,11 @@ ASSETS = {
     "/dashboard/dashboard.css": (asset("dashboard.css"), "text/css"),
     "/dashboard/validation-summary.js": (
         asset("validation-summary.js"),
+        "text/javascript; charset=utf-8",
+    ),
+    "/dashboard/agreement-tree.js": (asset("agreement-tree.js"), "text/javascript; charset=utf-8"),
+    "/dashboard/performance-summary.js": (
+        asset("performance-summary.js"),
         "text/javascript; charset=utf-8",
     ),
     "/pixel-lab/pixel-lab.js": (asset("pixel-lab.js"), "text/javascript; charset=utf-8"),
@@ -86,6 +92,7 @@ class Backend:
         CaptureInbox(db).close()
         self.dashboard = DashboardStore(db)
         self.judging = JudgeQueue(self.dashboard)
+        self.agreement = AgreementEvaluator(self.dashboard, enabled=self.judging.enabled)
         self.active_run: dict[str, Any] | None = None
         policy_path = Path(db).parent / "settings.json"
         if policy_path.exists():
@@ -222,6 +229,7 @@ class Backend:
                     "in the backend environment to compare."
                 ),
                 "judging": self.judging.snapshot(),
+                "reference_judging": self.agreement.stats(),
             }
 
     def start_run(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -264,7 +272,7 @@ class Backend:
             self.gate.set()
             return run
 
-    def end_run(self, payload: dict[str, Any]) -> None:
+    def update_run(self, payload: dict[str, Any], *, finished: bool) -> None:
         with self.lock:
             if not self.active_run or payload["run_id"] != self.active_run["id"]:
                 raise CaptureConflict("Run is not active")
@@ -272,18 +280,23 @@ class Backend:
             if not isinstance(report, dict):
                 raise ValueError("Invalid report")
             run = dict(self.active_run)
-            run.update(
-                status="completed"
-                if report.get("checks")
-                and all(report["checks"].values())
-                and not report.get("test_error")
-                else "failed",
-                finished_at=time.time(),
-                summary=DashboardStore.report_summary(report),
-            )
+            run["summary"] = DashboardStore.report_summary(report)
+            if finished:
+                run.update(
+                    status="completed"
+                    if report.get("checks")
+                    and all(report["checks"].values())
+                    and not report.get("test_error")
+                    else "failed",
+                    finished_at=time.time(),
+                )
             self.dashboard.save_run(run)
-            self.active_run = None
-            self.gate.set()
+            self.active_run = None if finished else run
+            if finished:
+                self.gate.set()
+
+    def end_run(self, payload: dict[str, Any]) -> None:
+        self.update_run(payload, finished=True)
 
     def maintain_runs(self, config: dict[str, Any], *, clear: bool) -> dict:
         ids = config.get("run_ids")
@@ -296,8 +309,13 @@ class Backend:
             raise ValueError("Invalid run selection")
         if ids is None and config.get("all") is not True:
             raise ValueError("Select run_ids or explicitly all runs")
-        with self.lock, self.judging.lock:
-            if clear and (self.active_run or self.jobs.unfinished_tasks or self.judging.inflight):
+        with self.lock, self.judging.lock, self.agreement.lock:
+            if clear and (
+                self.active_run
+                or self.jobs.unfinished_tasks
+                or self.judging.inflight
+                or self.agreement.inflight
+            ):
                 raise MaintenanceConflict("Backend must be idle before clearing saved results")
             maintenance = RunMaintenance(self.db)
             if not clear:
@@ -461,6 +479,8 @@ def serve(
                 self.reply(200, backend.snapshot())
             elif path == "/v1/runs":
                 self.reply(200, {"runs": backend.dashboard.runs()})
+            elif path == "/v1/agreement":
+                self.reply(200, backend.agreement.snapshot(query.get("run_id", [None])[0]))
             elif path == "/v1/traces":
                 self.reply(
                     200,
@@ -518,6 +538,9 @@ def serve(
                 elif path == "/v1/runs/end":
                     backend.end_run(json.loads(raw))
                     self.reply(200, {"saved": True})
+                elif path == "/v1/runs/progress":
+                    backend.update_run(config, finished=False)
+                    self.reply(200, {"saved": True})
                 elif path in {"/v1/runs/clear/preview", "/v1/runs/clear"}:
                     self.reply(
                         200,
@@ -546,6 +569,12 @@ def serve(
                         compare=path == "/v1/captures" and backend.active_run is not None,
                     )
                     self.reply(202, {"accepted": True})
+                elif path == "/v1/agreement/cases":
+                    self.reply(200, backend.agreement.register(config))
+                elif path == "/v1/agreement/judge":
+                    self.reply(
+                        202, backend.agreement.submit(config["run_id"], config.get("limit", 2000))
+                    )
                 elif path == "/v1/judgments":
                     config = json.loads(raw)
                     limit = config.get("limit", 30)
@@ -578,8 +607,12 @@ def serve(
             except Exception:
                 self.reply(503, {"error": "ingestion unavailable"})
 
-    server = ThreadingHTTPServer((host, port), Handler)
-    server.daemon_threads = True
+    class DashboardHTTPServer(ThreadingHTTPServer):
+        # Page assets, polling, and capture delivery can connect in the same burst.
+        request_queue_size = 64
+        daemon_threads = True
+
+    server = DashboardHTTPServer((host, port), Handler)
     print(json.dumps({"ready": True, "port": server.server_port}), flush=True)
     try:
         server.serve_forever()

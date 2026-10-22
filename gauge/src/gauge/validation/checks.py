@@ -127,7 +127,7 @@ def offline(scenarios: list[Scenario]) -> dict:
             history += [message, {"role": "assistant", "content": text}]
             previous = rid
     # Repeat byte-identical independent inputs with distinct IDs, then reorder delivery.
-    single = next(e for e in events if e["operation"] == "chat.completions.create")
+    single = events[0]
     for i in range(4):
         e = json.loads(json.dumps(single))
         e["call_id"] = "call_" + f"{i + 1:032x}"
